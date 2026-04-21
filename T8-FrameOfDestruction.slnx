@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="dll/dll.vcxproj" Id="bee5d429-40dd-4d00-af08-1b4c88720f24" />
+  <Project Path="injector/injector.vcxproj" Id="c0d4c11e-8010-4bf8-aeab-83047671c60c" />
+</Solution>
