@@ -7,6 +7,7 @@
 #include "../namespaces.h"
 #include <format>
 #include <iomanip>
+#include <cstring>
 #include "../helper.h"
 
 class ReadProcessMemoryException : public std::runtime_error {
@@ -25,6 +26,7 @@ private:
     uintptr_t module_address;
     HANDLE process_handle;
     bool in_match;
+    std::string action_frame_path;
     std::map<std::string, std::map<std::string, std::vector<uintptr_t>>> c;
 
 public:
@@ -32,13 +34,16 @@ public:
         pid = DWORD(0);
         process_handle = nullptr;
         in_match = false;
-        std::string path_to_config = helper::GetCurrentDllDirectory() + "/config/memory_address.ini";
+        std::string path_to_config = helper::GetCurrentDllDirectory() + "\\T8FrameOfDestruction\\config\\memory_address.ini";
+        action_frame_path = path_to_config.substr(0, path_to_config.find_last_of("\\/")) + "\\actionable_frames.json";
         if (!config_parser.load(path_to_config)) {
             throw std::runtime_error(std::format("Failed to load memory_address.ini path: {}", path_to_config));
         }
         c = config_parser.data();
         module_address = (uintptr_t)GetModuleHandle("Polaris-Win64-Shipping.exe");
     }
+
+    const std::string& get_action_frame_path() const { return action_frame_path; }
 
     static uint64_t bytes_to_int(const std::vector<uint8_t>& b) {
         uint64_t result = 0;
@@ -129,6 +134,8 @@ public:
 
         auto p1_snapshot = std::make_shared<PlayerSnapshot>(p1_dict);
         auto p2_snapshot = std::make_shared<PlayerSnapshot>(p2_dict);
+        read_spatial_player(player_data_frame, 0, *p1_snapshot);
+        read_spatial_player(player_data_frame, p2_offset, *p2_snapshot);
 
         bool is_player_player_one;
         try {
@@ -147,7 +154,58 @@ public:
             player_data_frame, c["GameDataAddress"]["facing"][0]);
         bool facing_bool = raw_facing ^ is_player_player_one;
 
-        return std::make_shared<GameSnapshot>(p1_snapshot, p2_snapshot, frame_count, facing_bool);
+        auto snapshot = std::make_shared<GameSnapshot>(p1_snapshot, p2_snapshot, frame_count, facing_bool);
+        snapshot->camera = read_camera();
+        return snapshot;
+    }
+
+    static std::optional<WorldPoint> decode_position(const std::vector<uint8_t>& data, size_t offset) {
+        if (offset > data.size() || data.size() - offset < sizeof(WorldPoint)) return std::nullopt;
+        WorldPoint point;
+        std::memcpy(&point, data.data() + offset, sizeof(point));
+        return point.valid() ? std::optional<WorldPoint>(point) : std::nullopt;
+    }
+
+    void read_spatial_player(const std::vector<uint8_t>& data, size_t player_offset, PlayerSnapshot& player) const {
+        const auto section = c.find("SpatialPlayerData");
+        if (section == c.end()) return; // Older INIs retain the center fallback.
+        const auto read = [&](const char* key) -> std::optional<WorldPoint> {
+            auto setting = section->second.find(key);
+            if (setting == section->second.end() || setting->second.empty()) return std::nullopt;
+            const auto offset = setting->second.front();
+            if (player_offset > data.size() || offset > data.size() - player_offset) return std::nullopt;
+            return decode_position(data, player_offset + offset);
+        };
+        player.contact_position = read("contact_position");
+        player.attack_hitbox_position = read("attack_hitbox_position");
+    }
+
+    std::optional<CameraSnapshot> read_camera() const {
+        const auto section = c.find("SpatialCamera");
+        if (section == c.end()) return std::nullopt;
+        const auto trail = section->second.find("view_state_pointer");
+        const auto view = section->second.find("view_matrix_offset");
+        const auto projection = section->second.find("projection_matrix_offset");
+        if (trail == section->second.end() || trail->second.empty() ||
+            view == section->second.end() || view->second.empty() ||
+            projection == section->second.end() || projection->second.empty()) return std::nullopt;
+        // The optional camera may disappear during stage transitions. Unlike
+        // the required frame data, failure here must not interrupt frame hints.
+        const auto read = [](uintptr_t address, void* output, SIZE_T size) {
+            SIZE_T bytes = 0;
+            return address && ReadProcessMemory(GetCurrentProcess(),
+                reinterpret_cast<LPCVOID>(address), output, size, &bytes) && bytes == size;
+        };
+        uintptr_t camera = module_address;
+        for (auto offset : trail->second) {
+            if (!read(camera + offset, &camera, sizeof(camera)) || !camera) return std::nullopt;
+        }
+        CameraSnapshot result;
+        if (!read(camera + view->second.front(), result.view, sizeof(result.view)) ||
+            !read(camera + projection->second.front(), result.projection, sizeof(result.projection))) {
+            return std::nullopt;
+        }
+        return result;
     }
 
     std::pair<int, std::vector<uint8_t>> get_frame(uintptr_t player_data_base_address, int rollback_frame) {
@@ -244,10 +302,13 @@ public:
         return address;
     }
 
-    int get_4_bytes_from_data_block(const std::vector<uint8_t>& frame, int offset) {
+    static int get_4_bytes_from_data_block(const std::vector<uint8_t>& frame, int offset) {
         std::vector<uint8_t> bytes(frame.begin() + offset, frame.begin() + offset + 4);
         std::reverse(bytes.begin(), bytes.end());
-        return bytes_to_int(bytes);
+        // Preserve signed DWORD fields such as actionable_frame and Heat FA.
+        const auto value = bytes_to_int(bytes);
+        return static_cast<int>(value >= 0x80000000ULL
+            ? static_cast<int64_t>(value) - 0x100000000LL : static_cast<int64_t>(value));
     }
 
     //bool is_foreground_pid() {
@@ -285,7 +346,7 @@ private:
         }
 
         do {
-            // Сравниваем имя процесса (ANSI версия)
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (ANSI пїЅпїЅпїЅпїЅпїЅпїЅ)
             if (_stricmp(pe32.szExeFile, process_name.c_str()) == 0) {
                 DWORD pid = pe32.th32ProcessID;
                 CloseHandle(hSnapshot);
@@ -313,7 +374,7 @@ private:
             return 0;
         }
 
-        // Конвертируем имя модуля в нижний регистр для сравнения
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         std::string target_name = module_name;
         std::transform(target_name.begin(), target_name.end(), target_name.begin(),
             [](unsigned char c) { return std::tolower(c); });
@@ -335,10 +396,10 @@ private:
         return 0;
     };
     HANDLE get_process_handle(DWORD pid) {
-        // Открываем процесс с необходимыми правами доступа
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         HANDLE hProcess = OpenProcess(
             PROCESS_VM_READ | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION,
-            FALSE,  // Не наследуем дескриптор
+            FALSE,  // пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
             pid
         );
 
@@ -347,7 +408,7 @@ private:
             std::cerr << "Failed to open process (PID: " << pid
                 << "). Error code: " << error << std::endl;
 
-            // Попробуем с минимальными правами, если первый запрос не удался
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
             hProcess = OpenProcess(
                 PROCESS_QUERY_LIMITED_INFORMATION,
                 FALSE,

@@ -10,9 +10,22 @@
 #include <iostream>
 #include "MoveInfoEnums.h"
 #include "ConfigParser.h"
+#include "SpatialPosition.h"
 
 #undef max
 #undef min
+
+struct Entry {
+    int char_id;
+    std::string char_name;
+    bool is_player;
+    std::string move_id;
+    std::string fa;
+    std::string hit_type;
+    std::string complex_state;
+    std::optional<WorldPoint> flying_origin;
+    bool contact = false;
+};
 
 class PlayerSnapshot {
 public:
@@ -23,7 +36,10 @@ public:
     MoveInfoEnums::ComplexMoveStates complex_state;
     int damage_taken;
     int move_timer;
+    int raw_move_timer;
     int recovery;
+    int actionable_frame;
+    int published_frame_advantage;
     int frames_til_next_move;
     MoveInfoEnums::CharacterCodes char_id;
     MoveInfoEnums::ThrowTechs throw_tech;
@@ -31,6 +47,8 @@ public:
     MoveInfoEnums::InputAttackCodes input_button;
     MoveInfoEnums::StunStates stun_state;
     MoveInfoEnums::HitOutcome hit_outcome;
+    std::optional<WorldPoint> contact_position;
+    std::optional<WorldPoint> attack_hitbox_position;
 
     PlayerSnapshot(const std::map<std::string, int>& player_data_dict) {
         move_id = player_data_dict.at("move_id");
@@ -39,11 +57,30 @@ public:
         startup = player_data_dict.at("attack_startup");
         complex_state = static_cast<MoveInfoEnums::ComplexMoveStates>(player_data_dict.at("complex_move_state"));
         damage_taken = player_data_dict.at("damage_taken");
-        move_timer = (startup == 0) ? 0 : player_data_dict.at("move_timer");
+        raw_move_timer = player_data_dict.at("move_timer");
+        move_timer = (startup == 0) ? 0 : raw_move_timer;
         recovery = player_data_dict.at("recovery");
-        frames_til_next_move = recovery - move_timer;
+        auto action = player_data_dict.find("actionable_frame");
+        actionable_frame = action == player_data_dict.end() ? -1 : action->second;
+        auto advantage = player_data_dict.find("published_frame_advantage");
+        published_frame_advantage = advantage == player_data_dict.end() ? 0 : advantage->second;
+        // for block/hit reactions startup is 0 but the raw timer still counts
+        // the frames already spent in the reaction
+        frames_til_next_move = recovery - raw_move_timer;
         char_id = static_cast<MoveInfoEnums::CharacterCodes>(player_data_dict.at("char_id"));
-        throw_tech = static_cast<MoveInfoEnums::ThrowTechs>(player_data_dict.at("throw_tech"));
+        throw_tech = static_cast<MoveInfoEnums::ThrowTechs>(
+            static_cast<uint32_t>(player_data_dict.at("throw_tech")));
+        // Match Python's safeEnum: unrelated/unknown field values are NONE,
+        // not a throw break. Otherwise Heat captures can enter get_throw_break.
+        switch (throw_tech) {
+        case MoveInfoEnums::ThrowTechs::TE1:
+        case MoveInfoEnums::ThrowTechs::TE2:
+        case MoveInfoEnums::ThrowTechs::TE1_2:
+        case MoveInfoEnums::ThrowTechs::BROKEN_ThrowTechs:
+            break;
+        default:
+            throw_tech = MoveInfoEnums::ThrowTechs::NONE;
+        }
         input_direction = static_cast<MoveInfoEnums::InputDirectionCodes>(player_data_dict.at("input_direction"));
         input_button = static_cast<MoveInfoEnums::InputAttackCodes>(
             player_data_dict.at("input_attack") % static_cast<int>(MoveInfoEnums::InputAttackCodes::xRAGE));
@@ -58,6 +95,7 @@ public:
     std::shared_ptr<PlayerSnapshot> p2;
     int frame_count;
     bool facing_bool;
+    std::optional<CameraSnapshot> camera;
 
     GameSnapshot(std::shared_ptr<PlayerSnapshot> p1,
         std::shared_ptr<PlayerSnapshot> p2,

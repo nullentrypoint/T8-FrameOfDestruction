@@ -5,7 +5,7 @@
 
 namespace MoveInfoEnums {
 
-    // Базовый шаблонный класс для безопасных перечислений
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     template<typename T>
     class SafeEnum {
     protected:
@@ -23,6 +23,12 @@ namespace MoveInfoEnums {
 
     // UniversalMoves
     enum class UniversalMoves: long long {
+        HEAT_ENGAGER_RUN = 403,
+        HEAT_ENGAGER_RUN_ALT = 365,
+        HEAT_ENGAGER_REACTION_ALT = 377,
+        HEAT_ENGAGER_RECOVERY_ALT = 378,
+        HEAT_ENGAGER_REACTION = 417,
+        HEAT_ENGAGER_RECOVERY = 418,
         STANDING = 32769,
         CROUCHING = 32770
     };
@@ -33,11 +39,11 @@ namespace MoveInfoEnums {
         THROW = 6291466,
         MID_UNBLOCKABLE = 12582919,
         HIGH = 10485765,
-        SMID = 6291460,
+        SLOW = 6291460,
         MID = 8388610,
         LOW = 2097153,
         RECOVERING = 12582912,
-        UNKNOWN = 1048579
+        SMID = 1048579
     };
 
     // SimpleMoveStates
@@ -216,6 +222,7 @@ namespace MoveInfoEnums {
         FAHKUMRAM = 38,
         ARMOR_KING = 39,
         MIARY_ZO = 40,
+        KUNIMITSU = 41,
         _DUMMY = 116
     };
 

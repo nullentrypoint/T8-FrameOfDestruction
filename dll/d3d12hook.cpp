@@ -2,6 +2,7 @@
 #include "TekkenBot/GameLog.h"
 #include "TekkenBot/GameReader.h"
 #include "helper.h"
+#include "msdf_text.h"
 
 namespace hooks { void Remove(); }
 
@@ -36,6 +37,14 @@ namespace d3d12hook {
     static bool                   gAfterFirstPresent = false;
 
     void release();
+
+    // MSDF upload/vertex resources are shared across frames and must outlive submissions.
+    bool WaitForOverlayGPU() {
+        if (!gOverlayFence || gOverlayFence->GetCompletedValue() >= gOverlayFenceValue) return true;
+        if (gDevice && FAILED(gDevice->GetDeviceRemovedReason())) return true;
+        if (!gFenceEvent || FAILED(gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent))) return false;
+        return WaitForSingleObject(gFenceEvent, INFINITE) == WAIT_OBJECT_0;
+    }
 
     // Utility to log HRESULTs
     inline void LogHRESULT(const char* label, HRESULT hr) {
@@ -133,6 +142,8 @@ namespace d3d12hook {
             io.Fonts->AddFontDefault();
             std::string fontPath = helper::GetWindowsDir() + "\\Fonts\\consolab.ttf";
             overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
+            if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
+            msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
 
             try {
                 gameReader = std::make_shared<GameReader>();
@@ -182,15 +193,17 @@ namespace d3d12hook {
             io.MouseDrawCursor = false;
             menu::Init(io);
             if (overlayFont != NULL) {
-                overlay::Init(io, overlayFont);
+                overlay::SetCamera(std::nullopt);
                 if (gameReader) {
                     try {
                         gameLog.update(gameReader);
+                        overlay::SetCamera(gameReader->read_camera());
                     }
                     catch (const std::runtime_error& e) {
                         console::AddLogError(std::format("gameReader update: {}", e.what()));
                     }
                 }
+                overlay::Init(io, overlayFont);
             }
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
@@ -199,7 +212,7 @@ namespace d3d12hook {
             // Wait for the GPU to finish with the previous frame
             bool canRender = true;
             if (!gOverlayFence || !gFenceEvent) {
-                // Missing synchronization objects, skip waiting
+                canRender = false;
             } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
                 HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
@@ -259,6 +272,8 @@ namespace d3d12hook {
             gCommandList->SetDescriptorHeaps(1, heaps);
 
             ImGui::Render();
+            msdftext::Render(gCommandList, io.DisplaySize);
+            gCommandList->SetDescriptorHeaps(1, heaps);
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList);
 
             // Transition back to present
@@ -390,6 +405,12 @@ namespace d3d12hook {
                 gHeapSRV->GetGPUDescriptorHandleForHeapStart());
             DebugLog("[d3d12hook] ImGui initialized.\n");
 
+            io.Fonts->AddFontDefault();
+            const std::string fontPath = helper::GetWindowsDir() + "\\Fonts\\consolab.ttf";
+            overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
+            if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
+            msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
+
             inputhook::Init(desc.OutputWindow);
 
             if (!gOverlayFence) {
@@ -422,15 +443,17 @@ namespace d3d12hook {
             io.MouseDrawCursor = false;
             if (console::isOpen) console::Init(io);
             if (overlayFont != NULL) {
-                overlay::Init(io, overlayFont);
+                overlay::SetCamera(std::nullopt);
                 if (gameReader) {
                     try {
                         gameLog.update(gameReader);
+                        overlay::SetCamera(gameReader->read_camera());
                     }
                     catch (const std::runtime_error& e) {
                         console::AddLogError(std::format("gameReader update: {}", e.what()));
                     }
                 }
+                overlay::Init(io, overlayFont);
             }
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
@@ -439,7 +462,7 @@ namespace d3d12hook {
             // Wait for the GPU to finish with the previous frame
             bool canRender = true;
             if (!gOverlayFence || !gFenceEvent) {
-                // Missing synchronization objects, skip waiting
+                canRender = false;
             } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
                 HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
@@ -499,6 +522,8 @@ namespace d3d12hook {
             gCommandList->SetDescriptorHeaps(1, heaps);
 
             ImGui::Render();
+            msdftext::Render(gCommandList, io.DisplaySize);
+            gCommandList->SetDescriptorHeaps(1, heaps);
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList);
 
             // Transition back to present
@@ -584,6 +609,10 @@ namespace d3d12hook {
         {
             DebugLog("[d3d12hook] Releasing resources for resize\n");
 
+            if (!WaitForOverlayGPU()) return DXGI_ERROR_WAS_STILL_DRAWING;
+            msdftext::Shutdown();
+            overlayFont = nullptr;
+
             ImGui_ImplDX12_Shutdown();
             ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
@@ -633,6 +662,12 @@ namespace d3d12hook {
     void release() {
         DebugLog("[d3d12hook] Releasing resources and hooks.\n");
         gShutdown = true;
+        if (!WaitForOverlayGPU()) {
+            DebugLog("[d3d12hook] Cannot synchronize overlay shutdown\n");
+            return;
+        }
+        msdftext::Shutdown();
+        overlayFont = nullptr;
         if (globals::mainWindow) {
             inputhook::Remove(globals::mainWindow);
         }

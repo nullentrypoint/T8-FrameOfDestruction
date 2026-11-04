@@ -1,7 +1,7 @@
 #include "MoveInfoEnums.h"
 
 namespace MoveInfoEnums {
-    // Базовые реализации методов SafeEnum
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ SafeEnum
     template<typename T>
     std::unordered_map<long long, T>& SafeEnum<T>::value_map() {
         static std::unordered_map<long long, T> map;
@@ -123,6 +123,12 @@ namespace MoveInfoEnums {
     template<>
     std::unordered_map<long long, UniversalMoves>& SafeEnum<UniversalMoves>::value_map() {
         static std::unordered_map<long long, UniversalMoves> map = {
+            {403, UniversalMoves::HEAT_ENGAGER_RUN},
+            {365, UniversalMoves::HEAT_ENGAGER_RUN_ALT},
+            {377, UniversalMoves::HEAT_ENGAGER_REACTION_ALT},
+            {378, UniversalMoves::HEAT_ENGAGER_RECOVERY_ALT},
+            {417, UniversalMoves::HEAT_ENGAGER_REACTION},
+            {418, UniversalMoves::HEAT_ENGAGER_RECOVERY},
             {32769, UniversalMoves::STANDING},
             {32770, UniversalMoves::CROUCHING}
         };
@@ -132,6 +138,12 @@ namespace MoveInfoEnums {
     template<>
     std::unordered_map<UniversalMoves, std::string>& SafeEnum<UniversalMoves>::string_map() {
         static std::unordered_map<UniversalMoves, std::string> map = {
+            {UniversalMoves::HEAT_ENGAGER_RUN, "HEAT_ENGAGER_RUN"},
+            {UniversalMoves::HEAT_ENGAGER_RUN_ALT, "HEAT_ENGAGER_RUN_ALT"},
+            {UniversalMoves::HEAT_ENGAGER_REACTION_ALT, "HEAT_ENGAGER_REACTION_ALT"},
+            {UniversalMoves::HEAT_ENGAGER_RECOVERY_ALT, "HEAT_ENGAGER_RECOVERY_ALT"},
+            {UniversalMoves::HEAT_ENGAGER_REACTION, "HEAT_ENGAGER_REACTION"},
+            {UniversalMoves::HEAT_ENGAGER_RECOVERY, "HEAT_ENGAGER_RECOVERY"},
             {UniversalMoves::STANDING, "STANDING"},
             {UniversalMoves::CROUCHING, "CROUCHING"}
         };
@@ -145,11 +157,11 @@ namespace MoveInfoEnums {
             {6291466, AttackType::THROW},
             {12582919, AttackType::MID_UNBLOCKABLE},
             {10485765, AttackType::HIGH},
-            {6291460, AttackType::SMID},
+            {6291460, AttackType::SLOW},
             {8388610, AttackType::MID},
             {2097153, AttackType::LOW},
             {12582912, AttackType::RECOVERING},
-            {1048579, AttackType::UNKNOWN}
+            {1048579, AttackType::SMID}
         };
         return map;
     }
@@ -161,11 +173,11 @@ namespace MoveInfoEnums {
             {AttackType::THROW, "THROW"},
             {AttackType::MID_UNBLOCKABLE, "MID_UNBLOCKABLE"},
             {AttackType::HIGH, "HIGH"},
-            {AttackType::SMID, "SMID"},
+            {AttackType::SLOW, "S.LOW"},
             {AttackType::MID, "MID"},
             {AttackType::LOW, "LOW"},
             {AttackType::RECOVERING, "RECOVERING"},
-            {AttackType::UNKNOWN, "UNKNOWN"}
+            {AttackType::SMID, "S.MID"}
         };
         return map;
     }
@@ -523,6 +535,7 @@ namespace MoveInfoEnums {
             {38, CharacterCodes::FAHKUMRAM},
             {39, CharacterCodes::ARMOR_KING},
             {40, CharacterCodes::MIARY_ZO},
+            {41, CharacterCodes::KUNIMITSU},
             {116, CharacterCodes::_DUMMY}
         };
         return map;
@@ -571,6 +584,7 @@ namespace MoveInfoEnums {
             {CharacterCodes::FAHKUMRAM, "FAHKUMRAM"},
             {CharacterCodes::ARMOR_KING, "ARMOR_KING"},
             {CharacterCodes::MIARY_ZO, "MIARY_ZO"},
+            {CharacterCodes::KUNIMITSU, "KUNIMITSU"},
             {CharacterCodes::_DUMMY, "_DUMMY"}
         };
         return map;

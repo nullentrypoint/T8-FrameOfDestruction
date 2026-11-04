@@ -20,10 +20,10 @@ namespace console {
     std::shared_ptr<PlayerSnapshot> p1 = nullptr;
     std::shared_ptr<PlayerSnapshot> p2 = nullptr;
 
-    // Команды и их обработчики
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     std::unordered_map<std::string, std::function<void(const std::vector<std::string>&)>> commands;
 
-    // Безопасный callback
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ callback
     static int TextEditCallback(ImGuiInputTextCallbackData* data) {
         if (!data) return 0;
 
@@ -55,7 +55,7 @@ namespace console {
 
         case ImGuiInputTextFlags_CallbackCompletion:
         {
-            // Находим начало текущего слова
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
             const char* wordEnd = data->Buf + data->CursorPos;
             const char* wordStart = wordEnd;
             while (wordStart > data->Buf) {
@@ -67,7 +67,7 @@ namespace console {
 
             std::string currentWord(wordStart, wordEnd);
 
-            // Ищем совпадения
+            // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
             std::vector<std::string> matches;
             for (const auto& cmd : commands) {
                 if (cmd.first.find(currentWord) == 0)
@@ -75,7 +75,7 @@ namespace console {
             }
 
             if (matches.size() == 1) {
-                // Заменяем слово
+                // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
                 int startPos = (int)(wordStart - data->Buf);
                 int endPos = (int)(wordEnd - wordStart);
                 data->DeleteChars(startPos, endPos);
@@ -83,7 +83,7 @@ namespace console {
                 data->InsertChars(startPos + matches[0].size(), " ");
             }
             else if (matches.size() > 1) {
-                // Показываем варианты
+                // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
                 AddLog("possible completions:");
                 for (const auto& match : matches)
                     AddLog("- " + match);
@@ -121,14 +121,14 @@ namespace console {
 
         if (tokens.empty()) return;
 
-        // Добавляем в историю
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         history.push_back(commandLine);
         if (history.size() > 50) {
             history.erase(history.begin());
         }
         historyPos = -1;
 
-        // Ищем команду
+        // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         std::string cmd = tokens[0];
         auto it = commands.find(cmd);
         if (it != commands.end()) {
@@ -164,7 +164,7 @@ namespace console {
     }
 
     void DrawConsoleContent() {
-        // Регистрируем команды
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         commands["clear"] = [](const std::vector<std::string>&) { ClearLog(); };
         commands["help"] = [](const std::vector<std::string>&) {
             console::AddLog("available commands:");
@@ -194,6 +194,8 @@ namespace console {
             };
         commands["kv_readall"] = [](const std::vector<std::string>& args) {
             kv::ReadAll();
+            menu::LoadSettings();
+            console::AddLog("Settings reloaded and applied.");
             };
         commands["version"] = [](const std::vector<std::string>& args) {
             console::AddLog("Version: " + globals::appVersion);
@@ -291,7 +293,7 @@ namespace console {
             [](ImGuiInputTextCallbackData* data) -> int { return TextEditCallback(data); })) {
             if (inputBuf[0]) {
                 ExecCommand(inputBuf);
-                memset(inputBuf, 0, sizeof(inputBuf)); // Безопасная очистка
+                memset(inputBuf, 0, sizeof(inputBuf)); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
             }
             reclaimFocus = true;
         }

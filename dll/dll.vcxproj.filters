@@ -54,6 +54,9 @@
     <ClCompile Include="d3d12hook.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
+    <ClCompile Include="msdf_text.cpp">
+      <Filter>Sources Files</Filter>
+    </ClCompile>
     <ClCompile Include="d3d10hook.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
@@ -110,6 +113,9 @@
     <ClInclude Include="imgui\imconfig.h">
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
+    <ClInclude Include="msdf_text.h">
+      <Filter>Headers Files</Filter>
+    </ClInclude>
     <ClInclude Include="imgui\imgui.h">
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
@@ -155,10 +161,16 @@
     <ClInclude Include="TekkenBot\GameLog.h">
       <Filter>Sources Files\TekkenBot</Filter>
     </ClInclude>
+    <ClInclude Include="TekkenBot\ActionFrameStore.h">
+      <Filter>Sources Files\TekkenBot</Filter>
+    </ClInclude>
     <ClInclude Include="TekkenBot\GameReader.h">
       <Filter>Sources Files\TekkenBot</Filter>
     </ClInclude>
     <ClInclude Include="TekkenBot\GameSnapshot.h">
+      <Filter>Sources Files\TekkenBot</Filter>
+    </ClInclude>
+    <ClInclude Include="TekkenBot\SpatialPosition.h">
       <Filter>Sources Files\TekkenBot</Filter>
     </ClInclude>
     <ClInclude Include="TekkenBot\MoveInfoEnums.h">

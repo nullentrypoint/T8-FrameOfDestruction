@@ -165,20 +165,36 @@ namespace hooks_vk {
     bool IsInitialized();
 }
 
+struct HitRingSettings {
+    static constexpr const char* types[5] = { "S.MID", "S.LOW", "MID", "HIGH", "LOW" };
+    bool enabled = true;
+    float thickness = 3.0f;
+    float colors[5][3] = {
+        { 102 / 255.f, 255 / 255.f, 153 / 255.f }, // Neon #66FF99
+        { 57 / 255.f, 233 / 255.f, 255 / 255.f },  // #39E9FF
+        { 255 / 255.f, 228 / 255.f, 92 / 255.f },  // #FFE45C
+        { 255 / 255.f, 73 / 255.f, 118 / 255.f },  // #FF4976
+        { 102 / 255.f, 133 / 255.f, 255 / 255.f }  // #6685FF
+    };
+};
+
 struct FrameAdvantageHints {
-    bool enabled;
-    float fontSize;
-    bool fontShadow;
-    float flySpeed;
-    float fadeSpeed;
-    float color0[3];
-    float colorLargePlus[3];
-    float colorMediumPlus[3];
-    float colorSmallPlus[3];
-    float colorLargeMinus[3];
-    float colorMediumMinus[3];
-    float colorSmallMinus[3];
-    bool debugInfo;
+    bool enabled = true;
+    int startPositionMode = 1; // 0: random screen center, 1: contact / attack hitbox
+    bool lockToWorld = true;
+    float fontSize = 60.0f;
+    bool fontShadow = true;
+    float flySpeed = 1.0f;
+    float fadeSpeed = 0.015f;
+    float color0[3] = { 1.0f, 1.0f, 1.0f };                           // Neon #FFFFFF
+    float colorLargePlus[3] = { 132 / 255.f, 149 / 255.f, 255 / 255.f }; // #8495FF
+    float colorMediumPlus[3] = { 64 / 255.f, 222 / 255.f, 255 / 255.f }; // #40DEFF
+    float colorSmallPlus[3] = { 122 / 255.f, 255 / 255.f, 213 / 255.f }; // #7AFFD5
+    float colorLargeMinus[3] = { 255 / 255.f, 82 / 255.f, 122 / 255.f }; // #FF527A
+    float colorMediumMinus[3] = { 255 / 255.f, 121 / 255.f, 46 / 255.f }; // #FF792E: punishable (-10..-14)
+    float colorSmallMinus[3] = { 255 / 255.f, 224 / 255.f, 173 / 255.f }; // #FFE0AD: -1..-9
+    bool debugInfo = false;
+    HitRingSettings hitRing;
 };
 
 namespace menu {
@@ -191,7 +207,12 @@ namespace menu {
 namespace overlay {
     extern bool isOpen;
     extern void Init(ImGuiIO& io, ImFont* font);
-    extern void AddFlyingText(const std::string& text);
+    extern uint64_t AddFlyingText(const std::string& text,
+        const std::optional<ScreenAnchor>& anchor = std::nullopt,
+        const std::string& hitType = "",
+        const std::optional<WorldPoint>& worldOrigin = std::nullopt);
+    extern void SetCamera(const std::optional<CameraSnapshot>& camera);
+    extern void UpdateFlyingText(uint64_t id, const std::string& text);
 }
 
 namespace console {
@@ -232,10 +253,10 @@ namespace ini {
 }
 
 namespace kv {
-    extern ini::Config* movesOverrides;
     extern ini::Config* userSettings;
     extern void ReadAll();
 }
+
 
 // Helper to unload the DLL and remove all hooks
 void Uninject();

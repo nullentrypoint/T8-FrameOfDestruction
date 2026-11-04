@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="third_party\msdfgen\core\contour-combiners.cpp;third_party\msdfgen\core\Contour.cpp;third_party\msdfgen\core\convergent-curve-ordering.cpp;third_party\msdfgen\core\DistanceMapping.cpp;third_party\msdfgen\core\edge-coloring.cpp;third_party\msdfgen\core\edge-segments.cpp;third_party\msdfgen\core\edge-selectors.cpp;third_party\msdfgen\core\EdgeHolder.cpp;third_party\msdfgen\core\equation-solver.cpp;third_party\msdfgen\core\msdf-error-correction.cpp;third_party\msdfgen\core\MSDFErrorCorrection.cpp;third_party\msdfgen\core\msdfgen.cpp;third_party\msdfgen\core\Projection.cpp;third_party\msdfgen\core\rasterization.cpp;third_party\msdfgen\core\Scanline.cpp;third_party\msdfgen\core\Shape.cpp">
+      <PreprocessorDefinitions>MSDFGEN_PUBLIC=;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemGroup>
+</Project>

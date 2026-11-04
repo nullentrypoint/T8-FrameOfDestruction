@@ -17,21 +17,13 @@ namespace menu {
 
 
     // Дефолтные значения для FrameAdvantageHints
-    struct DefaultFrameAdvantageHints {
-        bool enabled = true;
-        float fontSize = 0.0f;
-        bool fontShadow = true;
-        float flySpeed = 1.000000f;
-        float fadeSpeed = 0.015000f;
-        float color0[3] = { 1.000000f, 1.000000f, 1.000000f };
-        float colorLargePlus[3] = { 0.078431f, 0.376586f, 1.000000f };
-        float colorMediumPlus[3] = { 0.000000f, 0.676471f, 1.000000f };
-        float colorSmallPlus[3] = { 0.200000f, 1.000000f, 1.000000f };
-        float colorLargeMinus[3] = { 0.647058f, 0.000000f, 1.000000f };
-        float colorMediumMinus[3] = { 1.000000f, 0.000000f, 0.000000f };
-        float colorSmallMinus[3] = { 1.000000f, 0.446078f, 0.446078f };
-        bool debugInfo = false;
-    } defaultFrameAdvantageHints;
+    const FrameAdvantageHints defaultFrameAdvantageHints{};
+
+    float DefaultFontSize() {
+        if (!ImGui::GetCurrentContext()) return 0.0f;
+        const float height = ImGui::GetIO().DisplaySize.y;
+        return std::isfinite(height) && height > 0.0f ? height / 18.0f : 0.0f;
+    }
 
     std::string getValue(const std::string& section, const std::string& key, const std::string& defaultVal) {
         if (kv::userSettings->HasKey(key, section)) {
@@ -49,10 +41,13 @@ namespace menu {
     void SaveAllSettings() {
         // Секция [FrameAdvantageHints]
         setKey("FrameAdvantageHints", "enabled", frameAdvantageHints.enabled ? "true" : "false");
+        setKey("FrameAdvantageHints", "startPositionMode", std::to_string(frameAdvantageHints.startPositionMode));
+        setKey("FrameAdvantageHints", "lockToWorld", frameAdvantageHints.lockToWorld ? "true" : "false");
         setKey("FrameAdvantageHints", "fontSize", std::to_string(frameAdvantageHints.fontSize));
         setKey("FrameAdvantageHints", "fontShadow", frameAdvantageHints.fontShadow ? "true" : "false");
         setKey("FrameAdvantageHints", "flySpeed", std::to_string(frameAdvantageHints.flySpeed));
         setKey("FrameAdvantageHints", "fadeSpeed", std::to_string(frameAdvantageHints.fadeSpeed));
+        setKey("FrameAdvantageHints", "debugInfo", frameAdvantageHints.debugInfo ? "true" : "false");
 
         // Сохраняем цвета
         setKey("FrameAdvantageHints", "color0_r", std::to_string(frameAdvantageHints.color0[0]));
@@ -83,6 +78,15 @@ namespace menu {
         setKey("FrameAdvantageHints", "colorSmallMinus_g", std::to_string(frameAdvantageHints.colorSmallMinus[1]));
         setKey("FrameAdvantageHints", "colorSmallMinus_b", std::to_string(frameAdvantageHints.colorSmallMinus[2]));
 
+        const auto& ring = frameAdvantageHints.hitRing;
+        setKey("HitRings", "enabled", ring.enabled ? "true" : "false");
+        setKey("HitRings", "thickness", std::to_string(ring.thickness));
+        const char* channels[] = { "r", "g", "b" };
+        for (int i = 0; i < 5; ++i) for (int c = 0; c < 3; ++c) {
+            setKey("HitRings", std::string(HitRingSettings::types[i]) + "_" + channels[c],
+                std::to_string(ring.colors[i][c]));
+        }
+
         kv::userSettings->Save();
 
         DebugLog("[menu] Settings saved\n");
@@ -91,7 +95,11 @@ namespace menu {
     // Загрузка настроек
     void LoadSettings() {
         frameAdvantageHints.enabled = getValue("FrameAdvantageHints", "enabled", defaultFrameAdvantageHints.enabled ? "true" : "false") == "true";
-        frameAdvantageHints.fontSize = std::stof(getValue("FrameAdvantageHints", "fontSize", std::to_string(defaultFrameAdvantageHints.fontSize)));
+        frameAdvantageHints.startPositionMode = getValue("FrameAdvantageHints", "startPositionMode",
+            std::to_string(defaultFrameAdvantageHints.startPositionMode)) == "0" ? 0 : 1;
+        frameAdvantageHints.lockToWorld = getValue("FrameAdvantageHints", "lockToWorld",
+            defaultFrameAdvantageHints.lockToWorld ? "true" : "false") == "true";
+        frameAdvantageHints.fontSize = std::stof(getValue("FrameAdvantageHints", "fontSize", std::to_string(DefaultFontSize())));
         frameAdvantageHints.fontShadow = getValue("FrameAdvantageHints", "fontShadow", defaultFrameAdvantageHints.fontShadow ? "true" : "false") == "true";
         frameAdvantageHints.flySpeed = std::stof(getValue("FrameAdvantageHints", "flySpeed", std::to_string(defaultFrameAdvantageHints.flySpeed)));
         frameAdvantageHints.fadeSpeed = std::stof(getValue("FrameAdvantageHints", "fadeSpeed", std::to_string(defaultFrameAdvantageHints.fadeSpeed)));
@@ -127,24 +135,30 @@ namespace menu {
 
         frameAdvantageHints.debugInfo = getValue("FrameAdvantageHints", "debugInfo", defaultFrameAdvantageHints.debugInfo ? "true" : "false") == "true";
 
+        auto& ring = frameAdvantageHints.hitRing;
+        const auto& ringDefaults = defaultFrameAdvantageHints.hitRing;
+        ring.enabled = getValue("HitRings", "enabled", ringDefaults.enabled ? "true" : "false") == "true";
+        auto readRingFloat = [&](const std::string& key, float fallback, float low, float high) {
+            try {
+                const float value = std::stof(getValue("HitRings", key, std::to_string(fallback)));
+                return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+            }
+            catch (const std::exception&) { return fallback; }
+        };
+        ring.thickness = readRingFloat("thickness", ringDefaults.thickness, 1.0f, 12.0f);
+        const char* channels[] = { "r", "g", "b" };
+        for (int i = 0; i < 5; ++i) for (int c = 0; c < 3; ++c) {
+            ring.colors[i][c] = readRingFloat(std::string(HitRingSettings::types[i]) + "_" + channels[c],
+                ringDefaults.colors[i][c], 0.0f, 1.0f);
+        }
+
         DebugLog("[menu] Settings loaded\n");
     }
 
     // Функция сброса настроек к дефолтным значениям
     void ResetToDefaults() {
-        frameAdvantageHints.enabled = defaultFrameAdvantageHints.enabled;
-        frameAdvantageHints.fontSize = defaultFrameAdvantageHints.fontSize;
-        frameAdvantageHints.fontShadow = defaultFrameAdvantageHints.fontShadow;
-        frameAdvantageHints.flySpeed = defaultFrameAdvantageHints.flySpeed;
-        frameAdvantageHints.fadeSpeed = defaultFrameAdvantageHints.fadeSpeed;
-
-        memcpy(frameAdvantageHints.color0, defaultFrameAdvantageHints.color0, sizeof(frameAdvantageHints.color0));
-        memcpy(frameAdvantageHints.colorLargePlus, defaultFrameAdvantageHints.colorLargePlus, sizeof(frameAdvantageHints.colorLargePlus));
-        memcpy(frameAdvantageHints.colorMediumPlus, defaultFrameAdvantageHints.colorMediumPlus, sizeof(frameAdvantageHints.colorMediumPlus));
-        memcpy(frameAdvantageHints.colorSmallPlus, defaultFrameAdvantageHints.colorSmallPlus, sizeof(frameAdvantageHints.colorSmallPlus));
-        memcpy(frameAdvantageHints.colorLargeMinus, defaultFrameAdvantageHints.colorLargeMinus, sizeof(frameAdvantageHints.colorLargeMinus));
-        memcpy(frameAdvantageHints.colorMediumMinus, defaultFrameAdvantageHints.colorMediumMinus, sizeof(frameAdvantageHints.colorMediumMinus));
-        memcpy(frameAdvantageHints.colorSmallMinus, defaultFrameAdvantageHints.colorSmallMinus, sizeof(frameAdvantageHints.colorSmallMinus));
+        frameAdvantageHints = defaultFrameAdvantageHints;
+        frameAdvantageHints.fontSize = DefaultFontSize();
 
         SaveAllSettings(); // Автоматически сохраняем после сброса
 
@@ -199,12 +213,8 @@ namespace menu {
     void Init(ImGuiIO& io) {
         DebugLog("[menu] Rendering menu. isOpen=%d, test=%.2f\n", isOpen, test);
 
-        if (defaultFrameAdvantageHints.fontSize == 0.0f) {
-            defaultFrameAdvantageHints.fontSize = io.DisplaySize.y / 18;
-        }
-
         if (frameAdvantageHints.fontSize == 0.0f) {
-            frameAdvantageHints.fontSize = io.DisplaySize.y / 18;
+            frameAdvantageHints.fontSize = DefaultFontSize();
         }
 
         io.MouseDrawCursor = isOpen;
@@ -329,6 +339,27 @@ namespace menu {
             ImGui::BeginDisabled(!frameAdvantageHints.enabled);
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+            if (ImGui::Checkbox("Lock text and ring to world position", &frameAdvantageHints.lockToWorld))
+                SaveAllSettings();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("New hints rise from the original impact / attack point in world space.\nCamera motion changes their screen position. Without world data (TEST), uses screen-space flight.");
+            }
+
+            ImGui::BeginDisabled(frameAdvantageHints.lockToWorld);
+
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+            int tempStartPosition = frameAdvantageHints.startPositionMode;
+            const char* startPositions[] = { "1 - Screen center (random)", "2 - Impact / attack hitbox" };
+            if (ImGui::Combo("Start Position", &tempStartPosition, startPositions, IM_ARRAYSIZE(startPositions))) {
+                frameAdvantageHints.startPositionMode = tempStartPosition;
+                SaveAllSettings();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Impact point on hit/block; attack hitbox on whiff.\nWithout position data (including TEST), uses screen center.");
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
             float tempFontSize = frameAdvantageHints.fontSize;
             if (ImGui::SliderFloat("Font Size", &tempFontSize, 20.0f, 200.0f)) {
                 SetFrameAdvantageFontSize(tempFontSize);
@@ -345,12 +376,33 @@ namespace menu {
             if (ImGui::SliderFloat("Fly Speed", &tempFlySpeed, 0.1f, 25.0f)) {
                 SetFrameAdvantageFlySpeed(tempFlySpeed);
             }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Initial upward speed: game world units per frame when world-locked, pixels per frame otherwise.");
+            }
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
             float tempFadeSpeed = frameAdvantageHints.fadeSpeed;
             if (ImGui::SliderFloat("Fade Speed", &tempFadeSpeed, 0.01f, 0.06f)) {
                 SetFrameAdvantageFadeSpeed(tempFadeSpeed);
             }
+
+            ImGui::Separator();
+            ImGui::Text("Hit rings:");
+            auto& ring = frameAdvantageHints.hitRing;
+            if (ImGui::Checkbox("Enable hit rings", &ring.enabled)) SaveAllSettings();
+            ImGui::BeginDisabled(!ring.enabled);
+            if (ImGui::SliderFloat("Ring line thickness", &ring.thickness, 1.0f, 12.0f, "%.1f px"))
+                SaveAllSettings();
+            for (int i = 0; i < 5; ++i) {
+                ImGui::PushID(i);
+                if (ImGui::ColorEdit3(HitRingSettings::types[i], ring.colors[i])) SaveAllSettings();
+                if (ImGui::Button("TEST ring")) {
+                    overlay::AddFlyingText("+4", std::nullopt, HitRingSettings::types[i]);
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndDisabled();
+            ImGui::Separator();
 
             // Цвета для подсказок
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);

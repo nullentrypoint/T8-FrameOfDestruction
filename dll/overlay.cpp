@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "msdf_text.h"
 #include <vector>
 #include <string>
 #include <time.h>
@@ -7,18 +8,29 @@
 
 namespace overlay {
     struct FlyingText {
+        uint64_t id;
         std::string text;
         ImVec2 position;
+        bool centered;
         float alpha;
         float speed;
         float acceleration;
         float fontSize;
         ImColor color;
-        float outlineThickness; // Добавляем толщину обводки
-        ImColor outlineColor;   // И цвет обводки
+        float outlineThickness; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+        ImColor outlineColor;   // пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+        int ringType = -1;
+        bool worldLocked = false;
+        std::optional<WorldPoint> worldOrigin;
+        float worldRise = 0.0f;
     };
 
     std::vector<FlyingText> flyingTexts;
+    std::optional<CameraSnapshot> currentCamera;
+
+    void SetCamera(const std::optional<CameraSnapshot>& camera) {
+        currentCamera = camera;
+    }
     float fontSize = 60.0f;
     ImColor defaultColor = ImColor(255, 255, 255, 255);
     ImVec2 screenSize;
@@ -86,72 +98,155 @@ namespace overlay {
         );
     }
 
-    void AddFlyingText(const std::string& text) {
+    uint64_t AddFlyingText(const std::string& text, const std::optional<ScreenAnchor>& anchor,
+        const std::string& hitType, const std::optional<WorldPoint>& worldOrigin) {
         if (!menu::frameAdvantageHints.enabled) {
-            return;
+            return 0;
         }
 
-        srand(time(0));
-        int y = screenSize.y * 0.2f;
-        int randomNumX = (rand() % y) - (y * 0.5f);
-        int randomNumY = (rand() % y) - (y * 0.5f);
-        
-
-        ImVec2 startPosition = ImVec2(screenSize.x * 0.5f + randomNumX, screenSize.y * 0.5f + randomNumY);
+        const auto display = ImGui::GetIO().DisplaySize;
+        if (display.x <= 0 || display.y <= 0) return 0;
+        const bool locked = menu::frameAdvantageHints.lockToWorld;
+        const bool spatial = locked || menu::frameAdvantageHints.startPositionMode == 1;
+        ImVec2 startPosition(display.x * 0.5f, display.y * 0.5f);
+        int randomNumX = 0, randomNumY = 0;
+        if (!spatial) {
+            srand(static_cast<unsigned int>(time(0)));
+            const int range = std::max(1, static_cast<int>(display.y * 0.2f));
+            randomNumX = static_cast<int>((rand() % range) - range * 0.5f);
+            randomNumY = static_cast<int>((rand() % range) - range * 0.5f);
+            startPosition.x += randomNumX;
+            startPosition.y += randomNumY;
+        }
+        else if (anchor) {
+            const ImVec2 projected(startPosition.x + anchor->horizontal * display.x * 0.5f,
+                startPosition.y - anchor->vertical * display.y * 0.5f);
+            if (std::isfinite(projected.x) && std::isfinite(projected.y) &&
+                projected.x >= 0 && projected.x <= display.x &&
+                projected.y >= 0 && projected.y <= display.y) {
+                startPosition = projected;
+            }
+        }
         if (menu::frameAdvantageHints.debugInfo) {
             console::AddLog(std::format("AddFlyingText startPosition {} {} randomNum {} {}", startPosition.x, startPosition.y, randomNumX, randomNumY));
         }
         ImColor color = getColor(text);
+        static uint64_t nextId = 0;
+        const uint64_t id = ++nextId;
         flyingTexts.push_back({
+            id,
             text,
             startPosition,
-            1.0f, // начальная прозрачность
-            menu::frameAdvantageHints.flySpeed, // скорость движения
-            1.05f, // ускорение
-            fontSize,
+            spatial,
+            1.0f, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            menu::frameAdvantageHints.flySpeed, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            1.05f, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            menu::frameAdvantageHints.fontSize,
             color,
-            menu::frameAdvantageHints.fontShadow ? 1.5f : 0.0f, // толщина обводки
-            ImColor(0, 0, 0, 255) // цвет обводки
+            menu::frameAdvantageHints.fontShadow ? 1.5f : 0.0f, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            ImColor(0, 0, 0, 255) // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
             });
+        flyingTexts.back().worldLocked = locked;
+        if (locked && worldOrigin && worldOrigin->valid()) flyingTexts.back().worldOrigin = worldOrigin;
+        for (int i = 0; i < 5; ++i) {
+            if (hitType == HitRingSettings::types[i] || (i == 2 && hitType == "MID_UNBLOCKABLE")) {
+                flyingTexts.back().ringType = i;
+                break;
+            }
+        }
+        return id;
+    }
+
+    void UpdateFlyingText(uint64_t id, const std::string& value) {
+        if (id == 0) return;
+        for (auto& text : flyingTexts) {
+            if (text.id == id) {
+                text.text = value;
+                text.color = getColor(value);
+                text.color.Value.w = text.alpha;
+                return;
+            }
+        }
     }
 
     void DrawTextWithOutline(ImDrawList* drawList, ImFont* font, const FlyingText& text) {
+        if (text.text == "JGL" || text.text == "KND") return;
+        ImVec4 outline = text.outlineColor.Value;
+        outline.w = text.alpha;
+        if (msdftext::AddText(text.text, text.position, text.fontSize, text.centered,
+            text.color.Value, outline, text.outlineThickness)) return;
+        const ImVec2 textSize = font->CalcTextSizeA(text.fontSize, FLT_MAX, 0.0f, text.text.c_str());
+        ImVec2 position = text.position;
+        if (text.centered) {
+            position.x -= textSize.x * 0.5f;
+            position.y -= textSize.y * 0.5f;
+        }
         if (text.outlineThickness > 0.0f) {
             const float outlineFontSize = text.fontSize + text.outlineThickness * 2.0f;
-            ImVec2 textSize = font->CalcTextSizeA(text.fontSize, FLT_MAX, 0.0f, text.text.c_str());
             ImVec2 outlineTextSize = font->CalcTextSizeA(outlineFontSize, FLT_MAX, 0.0f, text.text.c_str());
             ImVec2 outlinePos = ImVec2(
-                text.position.x - (outlineTextSize.x - textSize.x) * 0.5f,
-                text.position.y - (outlineTextSize.y - textSize.y) * 0.5f
+                position.x - (outlineTextSize.x - textSize.x) * 0.5f,
+                position.y - (outlineTextSize.y - textSize.y) * 0.5f
             );
 
             ImColor outlineColor = text.outlineColor;
-            outlineColor.Value.w = text.alpha; // Применяем прозрачность
+            outlineColor.Value.w = text.alpha; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 
             drawList->AddText(font, outlineFontSize, outlinePos, outlineColor, text.text.c_str());
         }
 
-        // Основной текст
-        drawList->AddText(font, text.fontSize, text.position, text.color, text.text.c_str());
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
+        drawList->AddText(font, text.fontSize, position, text.color, text.text.c_str());
     }
 
     void UpdateAndDraw(ImGuiIO& io, ImFont* font) {
         ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-        // Обновляем и рисуем все летающие тексты
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
         for (auto it = flyingTexts.begin(); it != flyingTexts.end(); ) {
             auto& text = *it;
 
-            // Обновляем положение и прозрачность
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            bool visible = true;
             text.speed *= text.acceleration;
-            text.position.y -= text.speed;
+            if (text.worldLocked && text.worldOrigin) {
+                text.worldRise += text.speed;
+                WorldPoint point = *text.worldOrigin;
+                point.y += text.worldRise; // Tekken world Y is vertical (game units).
+                const auto anchor = currentCamera ? currentCamera->project(point) : std::nullopt;
+                visible = anchor && std::abs(anchor->horizontal) <= 1.0f && std::abs(anchor->vertical) <= 1.0f;
+                if (visible) {
+                    text.position = ImVec2((1.0f + anchor->horizontal) * io.DisplaySize.x * 0.5f,
+                        (1.0f - anchor->vertical) * io.DisplaySize.y * 0.5f);
+                }
+            }
+            else {
+                // TEST/missing world data uses the ordinary screen-space flight.
+                text.position.y -= text.speed;
+            }
             text.alpha -= menu::frameAdvantageHints.fadeSpeed;
             text.color.Value.w = text.alpha;
 
-            // Рисуем текст с обводкой
-            DrawTextWithOutline(drawList, font, text);
+            const auto& ring = menu::frameAdvantageHints.hitRing;
+            if (visible && ring.enabled && text.ringType >= 0 && text.alpha > 0.0f) {
+                const ImVec2 size = font->CalcTextSizeA(text.fontSize, FLT_MAX, 0.0f, text.text.c_str());
+                ImVec2 center = text.position;
+                if (!text.centered) {
+                    center.x += size.x * 0.5f;
+                    center.y += size.y * 0.5f;
+                }
+                const float progress = std::clamp(1.0f - text.alpha, 0.0f, 1.0f);
+                const float radius = std::sqrt(size.x * size.x + size.y * size.y) * 0.5f
+                    + text.fontSize * (0.1f + progress * 0.75f);
+                const auto& rgb = ring.colors[text.ringType];
+                drawList->AddCircle(center, radius, ImColor(rgb[0], rgb[1], rgb[2], text.alpha),
+                    0, ring.thickness);
+            }
 
-            // Удаляем текст если он стал полностью прозрачным
+            // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+            if (visible && text.alpha > 0.0f) DrawTextWithOutline(drawList, font, text);
+
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
             if (text.alpha <= 0.0f) {
                 it = flyingTexts.erase(it);
             }
@@ -162,10 +257,11 @@ namespace overlay {
     }
 
     void Init(ImGuiIO& io, ImFont* font) {
+        msdftext::BeginFrame();
         screenSize = io.DisplaySize;
         fontSize = menu::frameAdvantageHints.fontSize;
 
-        // Настройки окна оверлея
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
         ImGui::Begin("Overlay", nullptr,
@@ -177,7 +273,7 @@ namespace overlay {
             ImGuiWindowFlags_NoInputs |
             ImGuiWindowFlags_NoBackground);
 
-        // Обновляем и рисуем все тексты
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
         UpdateAndDraw(io, font);
 
         ImGui::End();
