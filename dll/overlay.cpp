@@ -5,8 +5,12 @@
 #include <time.h>
 #include <cstdlib>
 #include <format>
+#include <chrono>
 
 namespace overlay {
+    static double TimelineTime() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     struct TimedThrowTimeline {
         ThrowTimeline data;
         double resolved = -1;
@@ -19,7 +23,7 @@ namespace overlay {
         if (!timeline.visible || !timed.data.visible || timeline.event_frame != timed.data.event_frame)
             timed.resolved = -1;
         if (timeline.visible && timeline.result != ThrowTimeline::Result::Pending && timed.resolved < 0)
-            timed.resolved = ImGui::GetTime();
+            timed.resolved = TimelineTime();
         timed.data = timeline;
     }
 
@@ -37,7 +41,7 @@ namespace overlay {
         for (int side = 0; side < 2; ++side) {
             const auto& timed = throwTimelines[side];
             const auto& data = timed.data;
-            const double age = timed.resolved < 0 ? 0 : ImGui::GetTime() - timed.resolved;
+            const double age = timed.resolved < 0 ? 0 : TimelineTime() - timed.resolved;
             const float duration = std::clamp(settings.throwCardDuration, 1.0f, 15.0f);
             const float fade = std::clamp(settings.throwCardFade, 0.0f, duration);
             if (!data.visible || age >= duration) continue;

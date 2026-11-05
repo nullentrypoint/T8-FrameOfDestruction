@@ -206,68 +206,6 @@ namespace console {
         }
         ImGui::Separator();
 
-        if (menu::frameAdvantageHints.debugInfo) {
-            if (ImGui::CollapsingHeader("Players states")) {
-                try {
-                    if (ImGui::TreeNode("Player 1")) {
-                        if (p1 != nullptr) {
-                            ImGui::Text("attack_type: %d %s", p1->attack_type, MoveInfoEnums::SafeEnum<MoveInfoEnums::AttackType>::to_string(p1->attack_type));
-                            ImGui::Text("char_id: %d", p1->char_id);
-                            ImGui::Text("complex_state: %d %s", p1->complex_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::ComplexMoveStates>::to_string(p1->complex_state));
-                            ImGui::Text("damage_taken: %d", p1->damage_taken);
-                            ImGui::Text("frames_til_next_move: %d", p1->frames_til_next_move);
-                            ImGui::Text("hit_outcome: %d %s", p1->hit_outcome, MoveInfoEnums::SafeEnum<MoveInfoEnums::HitOutcome>::to_string(p1->hit_outcome));
-                            ImGui::Text("input_button: %d %s", p1->input_button, MoveInfoEnums::SafeEnum<MoveInfoEnums::InputAttackCodes>::to_string(p1->input_button));
-                            ImGui::Text("input_direction: %d %s", p1->input_direction, MoveInfoEnums::SafeEnum<MoveInfoEnums::InputDirectionCodes>::to_string(p1->input_direction));
-                            ImGui::Text("move_id: %d", p1->move_id);
-                            ImGui::Text("move_timer: %d", p1->move_timer);
-                            ImGui::Text("recovery: %d", p1->recovery);
-                            ImGui::Text("simple_state: %d %s", p1->simple_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::SimpleMoveStates>::to_string(p1->simple_state));
-                            ImGui::Text("startup: %d", p1->startup);
-                            ImGui::Text("stun_state: %d %s", p1->stun_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::StunStates>::to_string(p1->stun_state));
-                            ImGui::Text("throw_tech: %d %s", p1->throw_tech, MoveInfoEnums::SafeEnum<MoveInfoEnums::ThrowTechs>::to_string(p1->throw_tech));
-                        }
-                        ImGui::TreePop();
-                    }
-
-                    ImGui::Separator();
-
-                    if (ImGui::TreeNode("Player 2")) {
-                        if (p2 != nullptr) {
-                            ImGui::Text("attack_type: %d %s", p2->attack_type, MoveInfoEnums::SafeEnum<MoveInfoEnums::AttackType>::to_string(p2->attack_type));
-                            ImGui::Text("char_id: %d", p2->char_id);
-                            ImGui::Text("complex_state: %d %s", p2->complex_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::ComplexMoveStates>::to_string(p2->complex_state));
-                            ImGui::Text("damage_taken: %d", p2->damage_taken);
-                            ImGui::Text("frames_til_next_move: %d", p2->frames_til_next_move);
-                            ImGui::Text("hit_outcome: %d %s", p2->hit_outcome, MoveInfoEnums::SafeEnum<MoveInfoEnums::HitOutcome>::to_string(p2->hit_outcome));
-                            ImGui::Text("input_button: %d %s", p2->input_button, MoveInfoEnums::SafeEnum<MoveInfoEnums::InputAttackCodes>::to_string(p2->input_button));
-                            ImGui::Text("input_direction: %d %s", p2->input_direction, MoveInfoEnums::SafeEnum<MoveInfoEnums::InputDirectionCodes>::to_string(p2->input_direction));
-                            ImGui::Text("move_id: %d", p2->move_id);
-                            ImGui::Text("move_timer: %d", p2->move_timer);
-                            ImGui::Text("recovery: %d", p2->recovery);
-                            ImGui::Text("simple_state: %d %s", p2->simple_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::SimpleMoveStates>::to_string(p2->simple_state));
-                            ImGui::Text("startup: %d", p2->startup);
-                            ImGui::Text("stun_state: %d %s", p2->stun_state, MoveInfoEnums::SafeEnum<MoveInfoEnums::StunStates>::to_string(p2->stun_state));
-                            ImGui::Text("throw_tech: %d %s", p2->throw_tech, MoveInfoEnums::SafeEnum<MoveInfoEnums::ThrowTechs>::to_string(p2->throw_tech));
-                        }
-                        ImGui::TreePop();
-                    }
-                }
-                catch (...) {
-                    console::AddLogError("exception2");
-                }
-            }
-
-            ImGui::Separator();
-
-            if (ImGui::CollapsingHeader("Console stats")) {
-                ImGui::Text("Log items: %d", (int)items.size());
-                ImGui::Text("inputBuf: %s", inputBuf);
-                ImGui::Text("reclaimFocus: %d", (int)reclaimFocus);
-            }
-        }
-
-
         const float footerHeightToReserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
         ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footerHeightToReserve), false, ImGuiWindowFlags_HorizontalScrollbar);
 

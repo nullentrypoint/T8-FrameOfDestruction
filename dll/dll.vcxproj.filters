@@ -27,9 +27,6 @@
     <ClCompile Include="imgui\imgui.cpp">
       <Filter>Sources Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\imgui_demo.cpp">
-      <Filter>Sources Files\imgui</Filter>
-    </ClCompile>
     <ClCompile Include="imgui\imgui_draw.cpp">
       <Filter>Sources Files\imgui</Filter>
     </ClCompile>
@@ -57,15 +54,6 @@
     <ClCompile Include="msdf_text.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
-    <ClCompile Include="d3d10hook.cpp">
-      <Filter>Sources Files</Filter>
-    </ClCompile>
-    <ClCompile Include="d3d11hook.cpp">
-      <Filter>Sources Files</Filter>
-    </ClCompile>
-    <ClCompile Include="d3d9hook.cpp">
-      <Filter>Sources Files</Filter>
-    </ClCompile>
     <ClCompile Include="menu.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
@@ -73,21 +61,6 @@
       <Filter>Sources Files</Filter>
     </ClCompile>
     <ClCompile Include="globals.cpp">
-      <Filter>Sources Files</Filter>
-    </ClCompile>
-    <ClCompile Include="imgui\imgui_impl_dx9.cpp">
-      <Filter>Sources Files\imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="imgui\imgui_impl_dx10.cpp">
-      <Filter>Sources Files\imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="imgui\imgui_impl_vulkan.cpp">
-      <Filter>Sources Files\imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="imgui\imgui_impl_dx11.cpp">
-      <Filter>Sources Files\imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="vulkanhook.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
     <ClCompile Include="TekkenBot\MoveInfoEnums.cpp">
@@ -142,18 +115,6 @@
     </ClInclude>
     <ClInclude Include="namespaces.h">
       <Filter>Sources Files</Filter>
-    </ClInclude>
-    <ClInclude Include="imgui\imgui_impl_dx9.h">
-      <Filter>Sources Files\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="imgui\imgui_impl_dx10.h">
-      <Filter>Sources Files\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="imgui\imgui_impl_vulkan.h">
-      <Filter>Sources Files\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="imgui\imgui_impl_dx11.h">
-      <Filter>Headers Files</Filter>
     </ClInclude>
     <ClInclude Include="TekkenBot\ConfigParser.h">
       <Filter>Sources Files\TekkenBot</Filter>

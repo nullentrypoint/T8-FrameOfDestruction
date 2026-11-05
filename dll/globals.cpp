@@ -9,8 +9,6 @@ namespace globals {
     int uninjectKey = VK_F11;
     // Key to open/close the ImGui menu (INSERT by default)
     int openMenuKey = VK_F1;
-    // Preferred backend to hook (None = auto fallback -> Not recommanded, specify your engine here)
-    Backend preferredBackend = Backend::DX12;
     // Flag controlling runtime debug logging
     bool enableDebugLog = false;
     // Currently active rendering backend
@@ -28,9 +26,9 @@ namespace globals {
 
 // Log initial global values for debugging
 static void LogGlobals() {
-    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X, activeBackend=%d, preferredBackend=%d\n",
+    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X, activeBackend=%d\n",
         globals::mainModule, globals::mainWindow, globals::uninjectKey, globals::openMenuKey,
-        static_cast<int>(globals::activeBackend), static_cast<int>(globals::preferredBackend));
+        static_cast<int>(globals::activeBackend));
 }
 
 // Ensure we log when the DLL is loaded

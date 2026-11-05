@@ -125,22 +125,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="console.cpp" />
-    <ClCompile Include="d3d9hook.cpp" />
-    <ClCompile Include="d3d10hook.cpp" />
-    <ClCompile Include="d3d11hook.cpp" />
     <ClCompile Include="d3d12hook.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="globals.cpp" />
     <ClCompile Include="helper.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
-    <ClCompile Include="imgui\imgui_demo.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
-    <ClCompile Include="imgui\imgui_impl_dx11.cpp" />
-    <ClCompile Include="imgui\imgui_impl_dx9.cpp" />
-    <ClCompile Include="imgui\imgui_impl_dx10.cpp" />
     <ClCompile Include="imgui\imgui_impl_dx12.cpp" />
-    <ClCompile Include="imgui\imgui_impl_vulkan.cpp" />
     <ClCompile Include="imgui\imgui_impl_win32.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
@@ -152,18 +144,13 @@
     <ClCompile Include="overlay.cpp" />
     <ClCompile Include="msdf_text.cpp" />
     <ClCompile Include="TekkenBot\MoveInfoEnums.cpp" />
-    <ClCompile Include="vulkanhook.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="helper.h" />
     <ClInclude Include="msdf_text.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
-    <ClInclude Include="imgui\imgui_impl_dx9.h" />
-    <ClInclude Include="imgui\imgui_impl_dx10.h" />
-    <ClInclude Include="imgui\imgui_impl_dx11.h" />
     <ClInclude Include="imgui\imgui_impl_dx12.h" />
-    <ClInclude Include="imgui\imgui_impl_vulkan.h" />
     <ClInclude Include="imgui\imgui_impl_win32.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
     <ClInclude Include="imgui\imstb_rectpack.h" />

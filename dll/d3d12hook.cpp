@@ -10,6 +10,7 @@ namespace d3d12hook {
     std::shared_ptr<GameReader> gameReader = nullptr;
     GameLog gameLog;
     ImFont* overlayFont = NULL;
+    ImFont* menuFont = nullptr;
 
     PresentD3D12            oPresentD3D12 = nullptr;
     Present1Fn              oPresent1D3D12 = nullptr;
@@ -143,6 +144,9 @@ namespace d3d12hook {
             std::string fontPath = helper::GetWindowsDir() + "\\Fonts\\consolab.ttf";
             overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
             if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
+            const std::string menuFontPath = helper::GetWindowsDir() + "\\Fonts\\consola.ttf";
+            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f);
+            if (!menuFont) menuFont = io.Fonts->Fonts[0];
             msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
 
             try {
@@ -191,7 +195,7 @@ namespace d3d12hook {
             ImGuiIO& io = ImGui::GetIO();
 
             io.MouseDrawCursor = false;
-            menu::Init(io);
+            menu::Init(io, menuFont);
             if (overlayFont != NULL) {
                 overlay::SetCamera(std::nullopt);
                 if (gameReader) {
@@ -409,6 +413,9 @@ namespace d3d12hook {
             const std::string fontPath = helper::GetWindowsDir() + "\\Fonts\\consolab.ttf";
             overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
             if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
+            const std::string menuFontPath = helper::GetWindowsDir() + "\\Fonts\\consola.ttf";
+            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f);
+            if (!menuFont) menuFont = io.Fonts->Fonts[0];
             msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
 
             inputhook::Init(desc.OutputWindow);
@@ -612,6 +619,7 @@ namespace d3d12hook {
             if (!WaitForOverlayGPU()) return DXGI_ERROR_WAS_STILL_DRAWING;
             msdftext::Shutdown();
             overlayFont = nullptr;
+            menuFont = nullptr;
 
             ImGui_ImplDX12_Shutdown();
             ImGui_ImplWin32_Shutdown();
@@ -668,6 +676,7 @@ namespace d3d12hook {
         }
         msdftext::Shutdown();
         overlayFont = nullptr;
+        menuFont = nullptr;
         if (globals::mainWindow) {
             inputhook::Remove(globals::mainWindow);
         }

@@ -6,11 +6,65 @@
 #include <sstream>
 #include "helper.h"
 #include <format>
+#include <vector>
+#include <cstring>
+#include <chrono>
 
 namespace menu {
     bool isOpen = false;
     float test = 0.0f;
-    static int currentSection = 0; // 0=Main, 1=Settings, 2=Stats
+    static int currentSection = 1; // Settings first; console is a diagnostic tool.
+
+    struct Notification {
+        const char* title;
+        const char* detail;
+        double started;
+        double refreshed;
+    };
+    static std::vector<Notification> notifications;
+
+    static double NotificationTime() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    static void Notify(const char* title, const char* detail) {
+        if (!ImGui::GetCurrentContext()) return;
+        for (auto& item : notifications) {
+            if (std::strcmp(item.title, title) == 0) {
+                item.refreshed = NotificationTime();
+                item.detail = detail;
+                return;
+            }
+        }
+        if (notifications.size() == 3) notifications.erase(notifications.begin());
+        const double now = NotificationTime();
+        notifications.push_back({ title, detail, now, now });
+    }
+
+    static void DrawNotifications(const ImGuiIO& io, ImFont* font) {
+        if (!font) font = ImGui::GetFont();
+        const double now = NotificationTime();
+        std::erase_if(notifications, [now](const Notification& item) { return now - item.refreshed >= 4.5; });
+        auto* draw = ImGui::GetForegroundDrawList();
+        const float scale = std::clamp(io.DisplaySize.y / 1080.0f, 0.75f, 1.5f);
+        const float width = std::min(360.0f * scale, io.DisplaySize.x - 24.0f);
+        float y = 24.0f * scale;
+        for (const auto& item : notifications) {
+            const float age = static_cast<float>(now - item.refreshed);
+            const float alpha = std::min(std::clamp(static_cast<float>(now - item.started) / 0.18f, 0.0f, 1.0f), std::clamp((4.5f - age) / 0.5f, 0.0f, 1.0f));
+            const float x = io.DisplaySize.x - width - 24.0f * scale + (1.0f - alpha) * 20.0f * scale;
+            const auto color = [alpha](int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, static_cast<int>(a * alpha)); };
+            draw->AddRectFilled(ImVec2(x, y), ImVec2(x + width, y + 86 * scale), color(15, 16, 23, 245), 2 * scale);
+            draw->AddRect(ImVec2(x, y), ImVec2(x + width, y + 86 * scale), color(74, 49, 65), 2 * scale);
+            draw->AddRectFilled(ImVec2(x, y), ImVec2(x + 4 * scale, y + 86 * scale), color(240, 24, 85));
+            draw->PushClipRect(ImVec2(x + 10 * scale, y), ImVec2(x + width - 10 * scale, y + 86 * scale), true);
+            draw->AddText(font, 17 * scale, ImVec2(std::round(x + 20 * scale), std::round(y + 18 * scale)), color(255, 245, 249), item.title);
+            draw->AddText(font, 14 * scale, ImVec2(std::round(x + 20 * scale), std::round(y + 46 * scale)), color(173, 176, 190), item.detail);
+            draw->PopClipRect();
+            draw->AddRectFilled(ImVec2(x, y + 84 * scale), ImVec2(x + width * (1.0f - age / 4.5f), y + 86 * scale), color(240, 24, 85));
+            y += 98 * scale;
+        }
+    }
 
     // Данные для разных разделов
     FrameAdvantageHints frameAdvantageHints;
@@ -91,7 +145,12 @@ namespace menu {
                 std::to_string(ring.colors[i][c]));
         }
 
-        kv::userSettings->Save();
+        if (!kv::userSettings->Save()) {
+            Notify("SAVE FAILED", "Could not write the settings file.");
+            DebugLog("[menu] Failed to save settings\n");
+            return;
+        }
+        Notify("SETTINGS SAVED", "Your preferences have been updated.");
 
         DebugLog("[menu] Settings saved\n");
     }
@@ -106,7 +165,7 @@ namespace menu {
                 return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
             } catch (...) { return fallback; }
         };
-        frameAdvantageHints.throwCardStyle = static_cast<int>(throwSetting("throwCardStyle", 0, 0, 2));
+        frameAdvantageHints.throwCardStyle = static_cast<int>(throwSetting("throwCardStyle", static_cast<float>(defaultFrameAdvantageHints.throwCardStyle), 0, 2));
         frameAdvantageHints.throwCardDuration = throwSetting("throwCardDuration", 5, 1, 15);
         frameAdvantageHints.throwCardFade = throwSetting("throwCardFade", 1, 0, 3);
         frameAdvantageHints.startPositionMode = getValue("FrameAdvantageHints", "startPositionMode",
@@ -224,8 +283,13 @@ namespace menu {
         }
     }
 
-    void Init(ImGuiIO& io) {
-        DebugLog("[menu] Rendering menu. isOpen=%d, test=%.2f\n", isOpen, test);
+    void Init(ImGuiIO& io, ImFont* notificationFont) {
+        static bool announced = false;
+        if (!announced) {
+            Notify(globals::appName.c_str(), "Module loaded. Press F1 to open menu.");
+            announced = true;
+        }
+        DrawNotifications(io, notificationFont);
 
         if (frameAdvantageHints.fontSize == 0.0f) {
             frameAdvantageHints.fontSize = DefaultFontSize();
@@ -237,51 +301,105 @@ namespace menu {
             return;
         }
 
-        // Style setup (one-time)
-        static bool styled = false;
-        if (!styled) {
+        // Reapply the base theme: resize/fullscreen transitions recreate ImGui.
+        {
             ImGui::StyleColorsDark();
             ImVec4* colors = ImGui::GetStyle().Colors;
 
             // Custom color palette
-            colors[ImGuiCol_WindowBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.95f);
-            colors[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.08f, 0.08f, 0.95f);
+            colors[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.035f, 0.055f, 0.98f);
+            colors[ImGuiCol_ChildBg] = ImVec4(0.065f, 0.065f, 0.09f, 1.0f);
             colors[ImGuiCol_Header] = ImVec4(0.2f, 0.2f, 0.2f, 0.8f);
             colors[ImGuiCol_HeaderHovered] = ImVec4(0.3f, 0.3f, 0.3f, 0.9f);
             colors[ImGuiCol_HeaderActive] = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
-            colors[ImGuiCol_Button] = ImVec4(0.26f, 0.59f, 0.98f, 0.7f);
-            colors[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);
-            colors[ImGuiCol_ButtonActive] = ImVec4(0.06f, 0.53f, 0.98f, 1.0f);
+            colors[ImGuiCol_Button] = ImVec4(0.24f, 0.075f, 0.13f, 1.0f);
+            colors[ImGuiCol_ButtonHovered] = ImVec4(0.72f, 0.06f, 0.24f, 1.0f);
+            colors[ImGuiCol_ButtonActive] = ImVec4(0.94f, 0.09f, 0.33f, 1.0f);
             colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.15f, 0.8f);
             colors[ImGuiCol_FrameBgHovered] = ImVec4(0.2f, 0.2f, 0.2f, 0.9f);
+            colors[ImGuiCol_FrameBgActive] = ImVec4(0.32f, 0.10f, 0.18f, 1.0f);
+            colors[ImGuiCol_CheckMark] = colors[ImGuiCol_SliderGrab] = ImVec4(1.0f, 0.15f, 0.39f, 1.0f);
+            colors[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.45f, 0.60f, 1.0f);
+            colors[ImGuiCol_ResizeGrip] = ImVec4(0.85f, 0.06f, 0.28f, 0.35f);
+            colors[ImGuiCol_ResizeGripHovered] = colors[ImGuiCol_ButtonHovered];
+            colors[ImGuiCol_ResizeGripActive] = colors[ImGuiCol_ButtonActive];
+            colors[ImGuiCol_Header] = ImVec4(0.23f, 0.07f, 0.13f, 1.0f);
+            colors[ImGuiCol_HeaderHovered] = colors[ImGuiCol_ButtonHovered];
+            colors[ImGuiCol_HeaderActive] = colors[ImGuiCol_ButtonActive];
+            colors[ImGuiCol_Border] = ImVec4(0.27f, 0.18f, 0.24f, 1.0f);
+            colors[ImGuiCol_Text] = ImVec4(0.96f, 0.94f, 0.97f, 1.0f);
+            colors[ImGuiCol_TextDisabled] = ImVec4(0.57f, 0.57f, 0.65f, 1.0f);
+            auto& style = ImGui::GetStyle();
+            style.WindowPadding = ImVec2(16, 16);
+            style.FramePadding = ImVec2(10, 7);
+            style.ItemSpacing = ImVec2(10, 10);
+            style.WindowRounding = style.ChildRounding = 2.0f;
+            style.FrameRounding = style.GrabRounding = 2.0f;
 
-            styled = true;
-            DebugLog("[menu] Style applied.\n");
         }
 
-        // Window flags
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
-        ImGui::SetNextWindowSize(ImVec2(600, 800), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_FirstUseEver);
+        // Scale from a fresh copy each frame, and restore the shared overlay font/style.
+        struct MenuStyleScope {
+            ImGuiStyle style = ImGui::GetStyle();
+            ImFont* font;
+            float fontScale;
+            MenuStyleScope(ImFont* value, float scale) : font(value), fontScale(value->Scale) {
+                ImGui::GetStyle().ScaleAllSizes(scale);
+                font->Scale = 16.0f * scale / font->FontSize;
+                ImGui::PushFont(font);
+            }
+            ~MenuStyleScope() {
+                ImGui::PopFont();
+                font->Scale = fontScale;
+                ImGui::GetStyle() = style;
+            }
+        };
+        if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
+        const float scale = std::min(io.DisplaySize.x / 1920.0f, io.DisplaySize.y / 1080.0f);
+        MenuStyleScope menuStyle(notificationFont ? notificationFont : ImGui::GetFont(), scale);
 
-        ImGui::Begin(globals::appName.c_str(), &isOpen, flags);
+        // Refit after resolution changes, including changes while the menu was closed.
+        static float previousScale = 0.0f;
+        static ImVec2 previousSize;
+        const float margin = 16.0f * scale;
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
+        const ImVec2 maxSize(io.DisplaySize.x - 2 * margin, io.DisplaySize.y - 2 * margin);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(std::min(960.0f * scale, maxSize.x), std::min(450.0f * scale, maxSize.y)), maxSize);
+        if (previousScale != scale) {
+            const ImVec2 size = previousScale > 0 ? ImVec2(previousSize.x * scale / previousScale, previousSize.y * scale / previousScale) : ImVec2(1100 * scale, 800 * scale);
+            ImGui::SetNextWindowSize(ImVec2(std::min(size.x, maxSize.x), std::min(size.y, maxSize.y)));
+        }
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+
+        if (!ImGui::Begin(globals::appName.c_str(), &isOpen, flags)) { ImGui::End(); return; }
+        previousScale = scale;
+        previousSize = ImGui::GetWindowSize();
+        const ImVec2 position = ImGui::GetWindowPos();
+        ImGui::SetWindowPos(ImVec2(
+            std::clamp(position.x, margin, std::max(margin, io.DisplaySize.x - previousSize.x - margin)),
+            std::clamp(position.y, margin, std::max(margin, io.DisplaySize.y - previousSize.y - margin))));
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(1.0f, 0.12f, 0.35f, 1.0f), "%s", globals::appName.c_str());
+        ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - 110 * scale);
+        if (ImGui::Button("CLOSE", ImVec2(110 * scale, 36 * scale))) isOpen = false;
+        ImGui::TextDisabled("TRAINING OVERLAY  /  TEKKEN 8");
+        ImGui::Separator();
 
         // Левая панель навигации (фиксированная ширина)
-        ImGui::BeginChild("Navigation", ImVec2(180, 0), true);
+        ImGui::BeginChild("Navigation", ImVec2(200 * scale, 0), true);
 
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10);
 
         // Кнопки навигации
-        ImVec4 activeColor = ImVec4(0.26f, 0.59f, 0.98f, 0.9f);
+        ImVec4 activeColor = ImVec4(0.85f, 0.06f, 0.28f, 1.0f);
 
         // Кнопка MAIN - исправлено
-        bool wasMainActive = (currentSection == 0);
+        bool wasMainActive = (currentSection == 1);
         if (wasMainActive) {
             ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
         }
-        if (ImGui::Button("CONSOLE", ImVec2(160, 35))) {
-            currentSection = 0;
-            DebugLog("[menu] Switched to CONSOLE section\n");
+        if (ImGui::Button("SETTINGS", ImVec2(-1, 40 * scale))) {
+            currentSection = 1;
         }
         if (wasMainActive) {
             ImGui::PopStyleColor();
@@ -290,25 +408,27 @@ namespace menu {
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
 
         // Кнопка SETTINGS - исправлено
-        bool wasSettingsActive = (currentSection == 1);
+        bool wasSettingsActive = (currentSection == 0);
         if (wasSettingsActive) {
             ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
         }
-        if (ImGui::Button("SETTINGS", ImVec2(160, 35))) {
-            currentSection = 1;
-            DebugLog("[menu] Switched to SETTINGS section\n");
+        if (ImGui::Button("CONSOLE", ImVec2(-1, 40 * scale))) {
+            currentSection = 0;
         }
         if (wasSettingsActive) {
             ImGui::PopStyleColor();
         }
 
         // Информация о пути к файлу настроек
-        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 80);
+        ImGui::Spacing();
+        ImGui::TextDisabled("F1   Menu");
+        ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + 20 * scale, ImGui::GetWindowHeight() - 100 * scale));
         ImGui::Separator();
-        ImGui::SetCursorPosX(5);
+        ImGui::Spacing();
+        ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Version:");
-        ImGui::SetCursorPosX(5);
-        ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), globals::appVersion.c_str());
+        ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
+        ImGui::TextDisabled("%s", globals::appVersion.c_str());
 
         ImGui::EndChild(); // Конец левой панели
 
@@ -322,7 +442,7 @@ namespace menu {
         const char* sectionTitles[] = { "CONSOLE", "SETTINGS" };
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10);
-        ImGui::TextColored(ImVec4(0.26f, 0.59f, 0.98f, 1.0f), "%s", sectionTitles[currentSection]);
+        ImGui::TextColored(activeColor, "%s", sectionTitles[currentSection]);
         ImGui::Separator();
 
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10);
@@ -342,10 +462,12 @@ namespace menu {
         case 1: { // SETTINGS SECTION
             // Frame Advantage Hints Settings
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
-            ImGui::TextColored(ImVec4(0.26f, 0.59f, 0.98f, 1.0f), "Frame Advantage Hints:");
+            ImGui::TextDisabled("Changes are saved automatically.");
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.48f);
 
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+            ImGui::Indent(10.0f * scale);
             bool tempEnabled = frameAdvantageHints.enabled;
+            if (ImGui::CollapsingHeader("THROW BREAK / Timeline", ImGuiTreeNodeFlags_DefaultOpen)) {
             if (ImGui::Checkbox("Show Throw Break Timeline", &frameAdvantageHints.throwTimeline)) SaveAllSettings();
             ImGui::BeginDisabled(!frameAdvantageHints.throwTimeline);
             const char* throwStyles[] = { "Detailed", "Compact", "Minimal" };
@@ -354,8 +476,10 @@ namespace menu {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time after the result, including fade-out. Later animation updates do not restart it.");
             if (ImGui::SliderFloat("Throw Card Fade-out", &frameAdvantageHints.throwCardFade, 0.0f, 3.0f, "%.1f s")) SaveAllSettings();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fade during the final seconds of the duration. Zero disables fading. Limited to the card duration.");
-            ImGui::TextDisabled("Break buttons are revealed only after BROKEN or FAILED.");
+            ImGui::TextWrapped("Break buttons are revealed only after BROKEN or FAILED.");
             ImGui::EndDisabled();
+            }
+            if (ImGui::CollapsingHeader("FRAME ADVANTAGE / Text & motion", ImGuiTreeNodeFlags_DefaultOpen)) {
             if (ImGui::Checkbox("Enable Frame Advantage Hints", &tempEnabled)) {
                 SetFrameAdvantageEnabled(tempEnabled);
             }
@@ -410,8 +534,11 @@ namespace menu {
                 SetFrameAdvantageFadeSpeed(tempFadeSpeed);
             }
 
-            ImGui::Separator();
-            ImGui::Text("Hit rings:");
+            ImGui::EndDisabled();
+            }
+            if (ImGui::CollapsingHeader("HIT RINGS / Impact indicators")) {
+            ImGui::TextWrapped("Rings use the frame advantage hint position and require hints to be enabled.");
+            ImGui::BeginDisabled(!frameAdvantageHints.enabled);
             auto& ring = frameAdvantageHints.hitRing;
             if (ImGui::Checkbox("Enable hit rings", &ring.enabled)) SaveAllSettings();
             ImGui::BeginDisabled(!ring.enabled);
@@ -426,7 +553,10 @@ namespace menu {
                 ImGui::PopID();
             }
             ImGui::EndDisabled();
-            ImGui::Separator();
+            ImGui::EndDisabled();
+            }
+            if (ImGui::CollapsingHeader("COLORS / Frame advantage")) {
+            ImGui::BeginDisabled(!frameAdvantageHints.enabled);
 
             // Цвета для подсказок
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
@@ -456,7 +586,7 @@ namespace menu {
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 20);
             float tempColorMeduimPlus[3] = { frameAdvantageHints.colorMediumPlus[0], frameAdvantageHints.colorMediumPlus[1], frameAdvantageHints.colorMediumPlus[2] };
-            if (ImGui::ColorEdit3("Meduim Plus Color", tempColorMeduimPlus)) {
+            if (ImGui::ColorEdit3("Medium Plus Color", tempColorMeduimPlus)) {
                 SetColor(frameAdvantageHints.colorMediumPlus, tempColorMeduimPlus);
             }
 
@@ -511,11 +641,17 @@ namespace menu {
 
             ImGui::EndDisabled();
 
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20);
+            }
+            if (ImGui::CollapsingHeader("SYSTEM / Diagnostics & defaults")) {
+            if (ImGui::Checkbox("Show diagnostic information", &frameAdvantageHints.debugInfo)) SaveAllSettings();
+            ImGui::TextWrapped("Restore all overlay preferences to their default values. The reset is saved immediately.");
 
             if (ImGui::Button("Reset to defaults")) {
                 ResetToDefaults();
             }
+            }
+            ImGui::Unindent(10.0f * scale);
+            ImGui::PopItemWidth();
 
             break;
         }

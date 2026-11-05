@@ -8,12 +8,12 @@
   msbuild injector\injector.vcxproj /p:Configuration=Release /p:Platform=x64 /m
   ```
 - Direct DLL project builds produce `dll/x64/Release/dll.dll`. The project currently targets `.dll`, even if older `.asi` artifacts exist locally. Config deployment is manual; there is no post-build copy step.
-- Sources are explicitly listed in `.vcxproj`; register new compilation units there. `dll/stdafx.h` links bundled MinHook/Vulkan libraries via pragmas.
+- Sources are explicitly listed in `.vcxproj`; register new compilation units there. `dll/stdafx.h` links bundled MinHook and DXGI/D3D12 libraries via pragmas.
 
 ## Runtime and code boundaries
 - `injector/main.cpp` ignores CLI arguments: it waits for `Polaris-Win64-Shipping.exe` and loads `./dll.dll` relative to the **working directory**. Run elevated from the staged DLL directory.
 - Deploy `config/memory_address.ini` to `<DLL directory>/T8FrameOfDestruction/config/memory_address.ini`; a plain `config/` beside the DLL is insufficient. Keep this file in sync with reader changes.
-- `dll/dllmain.cpp` initializes hooks on a worker thread. `dll/globals.cpp` selects DX12 explicitly; the presence of other renderer hooks does not mean automatic fallback is enabled.
+- `dll/dllmain.cpp` initializes DX12 hooks on a worker thread. The DLL is DX12-only; other renderer hooks and backend selection have been removed. Only ImGui's DX12 and Win32 backends are compiled; its demo is excluded.
 - Frame-data flow: `dll/d3d12hook.cpp` owns the reader/log, `dll/TekkenBot/GameReader.h` reads configured memory fields, `GameSnapshot.h` models them, and `GameLog.h` computes frame advantage and updates `dll/overlay.cpp` labels. Most game logic is header-defined.
 - Learned action frames persist as `actionable_frames.json` beside the runtime memory INI; practice resets retain this learning.
 - The compiled ImGui backends are `dll/imgui/imgui_impl_*.cpp`, **not** the duplicate files under `dll/imgui/backends/`. ImGui's examples, workflows, and formatter config belong to the vendored library.

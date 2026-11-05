@@ -1,5 +1,21 @@
 # Frame advantage replay checks
 
+## Menu layout check
+
+From `dll/` in an x64 Visual Studio developer prompt (keep assertions enabled):
+
+```bat
+cl /nologo /std:c++20 /EHsc /MD /I. tests\menu_layout.cpp menu.cpp ini.cpp imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_widgets.cpp imgui\imgui_tables.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_menu_layout.exe /link /OPT:REF
+%TEMP%\t8_menu_layout.exe
+```
+
+Runs the real menu headlessly with Consolas Bold. Checks window bounds after
+1440p/720p/4K/800x600 and aspect-ratio changes, reopening after a resolution
+change while hidden, scaled font size, and restoration of shared font/style state.
+Visual appearance and mouse interaction still need in-game verification.
+
+## Replay checks
+
 Run from `dll/` in an x64 Visual Studio developer prompt:
 
 ```bat

@@ -6,6 +6,14 @@ GUI to study frame data while in game.
 
 This software is intended for educational purposes only.
 
+## Features
+
+- Real-time frame advantage on hit and block, shown as color-coded floating text.
+- Hit-type rings and optional world-locked indicators that follow the camera.
+- Throw-break timelines showing break windows, input timing and results, including tackles and ground throws. Break buttons are revealed after the result.
+- Automatic learning and persistence of actionable frames between sessions.
+- In-game customization with `F1`: colors, font size, animation, indicator placement and throw-card style.
+
 ## Getting Started
 
 1. Download and install [Visual C++ v14 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe)
