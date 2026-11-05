@@ -41,6 +41,10 @@ namespace menu {
     void SaveAllSettings() {
         // Секция [FrameAdvantageHints]
         setKey("FrameAdvantageHints", "enabled", frameAdvantageHints.enabled ? "true" : "false");
+        setKey("FrameAdvantageHints", "throwTimeline", frameAdvantageHints.throwTimeline ? "true" : "false");
+        setKey("FrameAdvantageHints", "throwCardStyle", std::to_string(frameAdvantageHints.throwCardStyle));
+        setKey("FrameAdvantageHints", "throwCardDuration", std::to_string(frameAdvantageHints.throwCardDuration));
+        setKey("FrameAdvantageHints", "throwCardFade", std::to_string(frameAdvantageHints.throwCardFade));
         setKey("FrameAdvantageHints", "startPositionMode", std::to_string(frameAdvantageHints.startPositionMode));
         setKey("FrameAdvantageHints", "lockToWorld", frameAdvantageHints.lockToWorld ? "true" : "false");
         setKey("FrameAdvantageHints", "fontSize", std::to_string(frameAdvantageHints.fontSize));
@@ -95,6 +99,16 @@ namespace menu {
     // Загрузка настроек
     void LoadSettings() {
         frameAdvantageHints.enabled = getValue("FrameAdvantageHints", "enabled", defaultFrameAdvantageHints.enabled ? "true" : "false") == "true";
+        frameAdvantageHints.throwTimeline = getValue("FrameAdvantageHints", "throwTimeline", "true") == "true";
+        const auto throwSetting = [&](const char* key, float fallback, float low, float high) {
+            try {
+                const float value = std::stof(getValue("FrameAdvantageHints", key, std::to_string(fallback)));
+                return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+            } catch (...) { return fallback; }
+        };
+        frameAdvantageHints.throwCardStyle = static_cast<int>(throwSetting("throwCardStyle", 0, 0, 2));
+        frameAdvantageHints.throwCardDuration = throwSetting("throwCardDuration", 5, 1, 15);
+        frameAdvantageHints.throwCardFade = throwSetting("throwCardFade", 1, 0, 3);
         frameAdvantageHints.startPositionMode = getValue("FrameAdvantageHints", "startPositionMode",
             std::to_string(defaultFrameAdvantageHints.startPositionMode)) == "0" ? 0 : 1;
         frameAdvantageHints.lockToWorld = getValue("FrameAdvantageHints", "lockToWorld",
@@ -332,6 +346,16 @@ namespace menu {
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
             bool tempEnabled = frameAdvantageHints.enabled;
+            if (ImGui::Checkbox("Show Throw Break Timeline", &frameAdvantageHints.throwTimeline)) SaveAllSettings();
+            ImGui::BeginDisabled(!frameAdvantageHints.throwTimeline);
+            const char* throwStyles[] = { "Detailed", "Compact", "Minimal" };
+            if (ImGui::Combo("Throw Card Style", &frameAdvantageHints.throwCardStyle, throwStyles, IM_ARRAYSIZE(throwStyles))) SaveAllSettings();
+            if (ImGui::SliderFloat("Throw Card Duration", &frameAdvantageHints.throwCardDuration, 1.0f, 15.0f, "%.1f s")) SaveAllSettings();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Time after the result, including fade-out. Later animation updates do not restart it.");
+            if (ImGui::SliderFloat("Throw Card Fade-out", &frameAdvantageHints.throwCardFade, 0.0f, 3.0f, "%.1f s")) SaveAllSettings();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fade during the final seconds of the duration. Zero disables fading. Limited to the card duration.");
+            ImGui::TextDisabled("Break buttons are revealed only after BROKEN or FAILED.");
+            ImGui::EndDisabled();
             if (ImGui::Checkbox("Enable Frame Advantage Hints", &tempEnabled)) {
                 SetFrameAdvantageEnabled(tempEnabled);
             }

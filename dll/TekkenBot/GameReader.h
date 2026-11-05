@@ -27,6 +27,13 @@ private:
     HANDLE process_handle;
     bool in_match;
     std::string action_frame_path;
+    struct ThrowCache {
+        uintptr_t pointer = 0;
+        MoveInfoEnums::CharacterCodes character{};
+        std::vector<ThrowBreakRule> rules;
+    };
+    ThrowCache throw_cache[2];
+    int throw_frame = -1;
     std::map<std::string, std::map<std::string, std::vector<uintptr_t>>> c;
 
 public:
@@ -134,6 +141,13 @@ public:
 
         auto p1_snapshot = std::make_shared<PlayerSnapshot>(p1_dict);
         auto p2_snapshot = std::make_shared<PlayerSnapshot>(p2_dict);
+        if (frame_count < throw_frame) {
+            throw_cache[0] = {};
+            throw_cache[1] = {};
+        }
+        throw_frame = frame_count;
+        read_throw_player(player_data_frame, 0, *p1_snapshot, throw_cache[0]);
+        read_throw_player(player_data_frame, p2_offset, *p2_snapshot, throw_cache[1]);
         read_spatial_player(player_data_frame, 0, *p1_snapshot);
         read_spatial_player(player_data_frame, p2_offset, *p2_snapshot);
 
@@ -164,6 +178,42 @@ public:
         WorldPoint point;
         std::memcpy(&point, data.data() + offset, sizeof(point));
         return point.valid() ? std::optional<WorldPoint>(point) : std::nullopt;
+    }
+
+    void read_throw_player(const std::vector<uint8_t>& data, size_t base,
+        PlayerSnapshot& player, ThrowCache& cache) {
+        const auto section = c.find("ThrowPlayerData");
+        if (section == c.end()) return;
+        auto field = [&](const char* name, auto& value) {
+            const auto entry = section->second.find(name);
+            if (entry == section->second.end() || entry->second.empty()) return false;
+            const auto offset = entry->second.front();
+            if (base > data.size() || offset > data.size() - base ||
+                sizeof(value) > data.size() - base - offset) return false;
+            std::memcpy(&value, data.data() + base + offset, sizeof(value));
+            return true;
+        };
+        uintptr_t pointer = 0;
+        uint8_t accepted = 0, counter = 0;
+        if (!field("move_pointer", pointer) || !field("animation", player.throw_animation) ||
+            !field("accepted", accepted) || !field("counter", counter) ||
+            !field("input", player.raw_throw_input) || !field("tag", player.raw_throw_tag)) return;
+        player.throw_fields_valid = true;
+        player.throw_accepted = accepted != 0;
+        player.throw_counter = counter != 0;
+        player.ground_buffer_valid = field("ground_buffer", player.ground_buffer);
+        // Ground continuations retain the idle tag. Inspect each changed move
+        // pointer, including untagged moves; never scan the same list every tick.
+        if (cache.pointer != pointer || cache.character != player.char_id) {
+            cache.pointer = pointer;
+            cache.character = player.char_id;
+            cache.rules = ReadThrowRules(pointer, [](uintptr_t address, void* out, size_t size) {
+                SIZE_T bytes = 0;
+                return address && ReadProcessMemory(GetCurrentProcess(),
+                    reinterpret_cast<LPCVOID>(address), out, size, &bytes) && bytes == size;
+            });
+        }
+        player.throw_rules = cache.rules;
     }
 
     void read_spatial_player(const std::vector<uint8_t>& data, size_t player_offset, PlayerSnapshot& player) const {

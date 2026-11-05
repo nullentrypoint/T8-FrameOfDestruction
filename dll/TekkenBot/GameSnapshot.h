@@ -11,6 +11,7 @@
 #include "MoveInfoEnums.h"
 #include "ConfigParser.h"
 #include "SpatialPosition.h"
+#include "ThrowMetadata.h"
 
 #undef max
 #undef min
@@ -49,6 +50,15 @@ public:
     MoveInfoEnums::HitOutcome hit_outcome;
     std::optional<WorldPoint> contact_position;
     std::optional<WorldPoint> attack_hitbox_position;
+    bool throw_fields_valid = false;
+    bool ground_buffer_valid = false;
+    int ground_buffer = 0;
+    uint32_t raw_throw_tag = 0;
+    uint32_t raw_throw_input = 0;
+    bool throw_accepted = false;
+    bool throw_counter = false;
+    float throw_animation = 0;
+    std::vector<ThrowBreakRule> throw_rules;
 
     PlayerSnapshot(const std::map<std::string, int>& player_data_dict) {
         move_id = player_data_dict.at("move_id");

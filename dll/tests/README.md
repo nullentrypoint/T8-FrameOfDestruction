@@ -66,6 +66,34 @@ entry waits one frame when necessary. Heat entries wait for the matching signed
 pair at +0x2354 during the run-in, retaining the original strike metadata.
 No move overrides or expression evaluator are used.
 
+### Dragunov Heat Engagers against Lars and Jin
+
+`dragunov_heat_live.txt` (external, 10058 frames) reproduces WS1+2 +60,
+1,2,1 +43, qcf4 +46 and b4,3 +49 before the eventual +9 update.
+Dragunov's run is 369. Lars uses reaction 378 for 1,2,1/b4,3, 379 for
+qcf4 (both retain the animation through recovery), and 380 -> 381 for
+WS1+2. Animation variants belong to each player's moveset independently.
+The pending Heat entry waits for opposite signed publications corroborated
+by both recovery timers; the value is read from the game, not fixed to +9.
+Earlier string labels stop following publications once the engager starts,
+so the final publication does not also revise an earlier hit's label.
+
+```bat
+python tests/replay_heat_capture.py --exe "%TEMP%\t8_replay.exe" --capture "PATH\dragunov_heat_live.txt"
+```
+
+Checks all 27 events in both orientations, including reset boundaries,
+preliminary string hits, final +9 values and absence of duplicate Heat labels.
+
+`dragunov_heat_jin.txt` (external, 2740 frames) confirms the same three
+reaction paths against Jin. They are shared animation variants, not
+Lars-specific IDs. All four engagers emit only the final +9; the preceding
+1,2 and b4 string hits retain their own labels (seven events total).
+
+```bat
+python tests/replay_heat_capture.py --exe "%TEMP%\t8_replay.exe" --capture "PATH\dragunov_heat_jin.txt" --opponent jin
+```
+
 Build the DLL from the repository root:
 
 ```bat

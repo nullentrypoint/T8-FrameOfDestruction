@@ -45,6 +45,7 @@ private:
     };
     std::map<bool, RecentPublication> recent_publications;
     std::map<bool, std::pair<int, int>> finished_attacks;
+    ThrowTimelineTracker throw_timeline;
 
 public:
     GameLog() : obj(nullptr) {}
@@ -110,8 +111,14 @@ public:
             recent_publications.clear();
             finished_attacks.clear();
             last_action_field.clear();
+            throw_timeline.reset();
+            overlay::ClearThrowTimelines();
         }
         state_log.push_back(game_snapshot);
+        const auto timelines = throw_timeline.update(game_snapshot);
+        for (int side = 0; side < 2; ++side) {
+            if (timelines[side]) overlay::UpdateThrowTimeline(side, *timelines[side]);
+        }
         track_action_frame(true, game_snapshot->p1);
         track_action_frame(false, game_snapshot->p2);
 
@@ -265,6 +272,7 @@ public:
         refresh_published_advantage(is_p1);
         refresh_late_stance(is_p1);
         Entry entry;
+        bool resolved_heat = false;
 
         int pending_count = 0;
         auto pending_it = pending.find(is_p1);
@@ -345,26 +353,24 @@ public:
             int age = state_log.back()->frame_count - started->frame_count;
             if (age < 0 || age > 240 || attacker->char_id != source->char_id ||
                 receiver->char_id != target->char_id ||
-                (receiver->move_id != static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION) &&
-                 receiver->move_id != static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RECOVERY) &&
-                 receiver->move_id != static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION_ALT) &&
-                 receiver->move_id != static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RECOVERY_ALT))) {
+                (receiver->move_id != target->move_id && receiver->move_id != heat_recovery_id(target))) {
                 pending_heat.erase(heat);
                 return;
             }
             int advantage = attacker->published_frame_advantage;
-            bool run_pair = (attacker->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RUN) &&
-                receiver->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RECOVERY)) ||
-                (attacker->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RUN_ALT) &&
-                 receiver->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_RECOVERY_ALT));
+            // Each player's animation IDs belong to their own moveset; a run
+            // variant must not require the opponent to use the same variant.
+            bool run_pair = is_heat_run(attacker->move_id) && receiver->move_id == heat_recovery_id(target);
             if (!run_pair ||
-                advantage == 0 || advantage == source->published_frame_advantage ||
+                advantage == 0 ||
+                advantage != receiver->frames_til_next_move - attacker->frames_til_next_move ||
                 static_cast<int64_t>(advantage) != -static_cast<int64_t>(receiver->published_frame_advantage)) {
                 return;
             }
             entry = heat->second.entry;
             entry.fa = (advantage > 0 ? "+" : "") + std::to_string(advantage);
             pending_heat.erase(heat);
+            resolved_heat = true;
         }
         else if (pending_count > 0) {
             auto receiver = get(!is_p1, 0);
@@ -419,8 +425,11 @@ public:
         }
 
         auto receiver = get(!is_p1);
-        if (receiver->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION) ||
-            receiver->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION_ALT)) {
+        if (!resolved_heat && is_heat_reaction(receiver)) {
+            // Earlier string hits must not consume the Heat publication and
+            // revise their labels as well as the pending engager label.
+            recent_publications.erase(is_p1);
+            recent_entries.erase(is_p1);
             pending_heat[is_p1] = { state_log.back(), entry };
             return;
         }
@@ -459,6 +468,35 @@ public:
         catch (...) {
             console::AddLogError("exception");
         }
+    }
+
+    static bool is_heat_reaction(const std::shared_ptr<PlayerSnapshot>& player) {
+        using Moves = MoveInfoEnums::UniversalMoves;
+        int move_id = player->move_id;
+        // These reaction paths are shared (verified against Lars and Jin).
+        // Do not gate them on the defender's character ID.
+        return move_id == static_cast<int>(Moves::HEAT_ENGAGER_REACTION) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_REACTION_ALT) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_REACTION_SHORT) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_REACTION_SHORT_ALT) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_REACTION_LONG);
+    }
+
+    static int heat_recovery_id(const std::shared_ptr<PlayerSnapshot>& reaction) {
+        // 378/379 retain their animation through recovery; the other paths
+        // advance to the adjacent recovery animation (377 -> 378 included).
+        if (reaction->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION_SHORT) ||
+            reaction->move_id == static_cast<int>(MoveInfoEnums::UniversalMoves::HEAT_ENGAGER_REACTION_SHORT_ALT)) {
+            return reaction->move_id;
+        }
+        return reaction->move_id + 1;
+    }
+
+    static bool is_heat_run(int move_id) {
+        using Moves = MoveInfoEnums::UniversalMoves;
+        return move_id == static_cast<int>(Moves::HEAT_ENGAGER_RUN) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_RUN_ALT) ||
+            move_id == static_cast<int>(Moves::HEAT_ENGAGER_RUN_ALT2);
     }
 
     Entry build(bool is_p1, std::shared_ptr<PlayerSnapshot> source = nullptr) {

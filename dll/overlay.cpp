@@ -7,6 +7,138 @@
 #include <format>
 
 namespace overlay {
+    struct TimedThrowTimeline {
+        ThrowTimeline data;
+        double resolved = -1;
+    };
+    std::array<TimedThrowTimeline, 2> throwTimelines;
+
+    void UpdateThrowTimeline(int side, const ThrowTimeline& timeline) {
+        if (side < 0 || side >= 2) return;
+        auto& timed = throwTimelines[side];
+        if (!timeline.visible || !timed.data.visible || timeline.event_frame != timed.data.event_frame)
+            timed.resolved = -1;
+        if (timeline.visible && timeline.result != ThrowTimeline::Result::Pending && timed.resolved < 0)
+            timed.resolved = ImGui::GetTime();
+        timed.data = timeline;
+    }
+
+    void ClearThrowTimelines() { throwTimelines = {}; }
+
+    void DrawThrowTimelines(ImGuiIO& io, ImFont* font) {
+        if (!menu::frameAdvantageHints.throwTimeline) return;
+        auto* draw = ImGui::GetWindowDrawList();
+        const auto& settings = menu::frameAdvantageHints;
+        const int style = std::clamp(settings.throwCardStyle, 0, 2);
+        const float logicalWidth = style == 0 ? 620.0f : style == 1 ? 460.0f : 360.0f;
+        const float height = style == 0 ? 136.0f : style == 1 ? 106.0f : 68.0f;
+        const float scale = std::min(std::clamp(io.DisplaySize.x / 1920.0f, 0.5f, 2.0f), io.DisplaySize.x / (logicalWidth + 24.0f));
+        const float width = logicalWidth * scale;
+        for (int side = 0; side < 2; ++side) {
+            const auto& timed = throwTimelines[side];
+            const auto& data = timed.data;
+            const double age = timed.resolved < 0 ? 0 : ImGui::GetTime() - timed.resolved;
+            const float duration = std::clamp(settings.throwCardDuration, 1.0f, 15.0f);
+            const float fade = std::clamp(settings.throwCardFade, 0.0f, duration);
+            if (!data.visible || age >= duration) continue;
+            const float alpha = fade > 0 ? static_cast<float>(std::clamp((duration - age) / fade, 0.0, 1.0)) : 1.0f;
+            const auto color = [alpha](int r, int g, int b, int a = 255) {
+                return IM_COL32(r, g, b, static_cast<int>(a * alpha));
+            };
+            const float x = (io.DisplaySize.x - width) * 0.5f;
+            const float y = std::min(io.DisplaySize.y * 0.70f, io.DisplaySize.y - (2 * height + 22) * scale) + side * (height + 10) * scale;
+            const auto accent = data.result == ThrowTimeline::Result::Broken ? color(122, 255, 213) :
+                data.result == ThrowTimeline::Result::Failed ? color(255, 82, 122) : color(64, 222, 255);
+            draw->AddRectFilled(ImVec2(x, y), ImVec2(x + width, y + height * scale), color(12, 17, 26, 225), 9 * scale);
+            draw->AddRectFilled(ImVec2(x, y + 10 * scale), ImVec2(x + 3 * scale, y + (height - 10) * scale), accent, scale);
+            const auto text = [&](float dx, float dy, const std::string& value, ImU32 tint, float size = 18.0f) {
+                draw->AddText(font, size * scale, ImVec2(x + dx * scale, y + dy * scale), tint, value.c_str());
+            };
+            const bool reveal = data.result == ThrowTimeline::Result::Broken || data.result == ThrowTimeline::Result::Failed;
+            const char* button = !reveal ? "--" : data.buttons == 1 ? "1" : data.buttons == 2 ? "2" :
+                data.buttons == 4 ? "1+2" : data.buttons == 3 ? "1 OR 2" : "?";
+            const char* result = data.result == ThrowTimeline::Result::Broken ? "BROKEN" :
+                data.result == ThrowTimeline::Result::Failed ? "FAILED" :
+                data.result == ThrowTimeline::Result::Pending ? "PENDING" : "UNCONFIRMED";
+            const float titleSize = style == 0 ? 23.0f : 18.0f;
+            const float resultFont = style == 0 ? 20.0f : 16.0f;
+            text(16, 12, std::format("P{}  {} [{}]", side + 1, data.ground ? "GROUND" : data.windows.empty() ? "BREAK" : "TACKLE", button), color(245, 248, 255), titleSize);
+            const auto resultSize = font->CalcTextSizeA(resultFont * scale, FLT_MAX, 0, result);
+            draw->AddText(font, resultFont * scale, ImVec2(x + width - 16 * scale - resultSize.x, y + 14 * scale), accent, result);
+            using Origin = ThrowTimeline::InputOrigin;
+            const std::string input = data.ground ? (data.input_origin == Origin::Buffered ? "BUFFERED" :
+                data.input_origin == Origin::Held ? "HELD" : data.input_origin == Origin::Carried ? "CARRIED" : "--") :
+                data.held ? "HELD" : data.input_frame >= 0 ? std::format("+{}f", data.input_frame) : "--";
+            std::string window = data.window_frames >= 0 ? std::format("{}f", data.window_frames) : "?";
+            if (!data.windows.empty()) {
+                window.clear();
+                for (const auto& part : data.windows) {
+                    if (!window.empty()) window += "/";
+                    window += part.start >= 0 && part.end >= 0 ? std::format("{}f", part.end - part.start) : "?";
+                }
+            }
+            if (style == 2) {
+                text(16, 40, std::format("WINDOW {}   INPUT {}", window, input), color(175, 185, 203), 15);
+                continue;
+            }
+            if (style == 0) {
+            text(16, 44, std::format("STARTUP {}", data.startup > 0 ? std::format("{}f", data.startup) : "?"), color(175, 185, 203));
+            text(235, 44, std::format("BREAK WINDOW {}", window), accent);
+            } else {
+                text(16, 38, std::format("STARTUP {}   WINDOW {}   INPUT {}",
+                    data.startup > 0 ? std::format("{}f", data.startup) : "?", window, input), color(175, 185, 203), 15);
+            }
+            const float left = x + 16 * scale, right = x + width - 16 * scale;
+            const float barY = y + (style == 0 ? 77 : 65) * scale;
+            const int windowExtent = !data.windows.empty() ? data.windows.back().end : data.window_frames;
+            const int span = std::max({ windowExtent > 0 ? windowExtent : data.observed_frames,
+                data.break_frame + 1, data.input_frame + 1, 1 });
+            const int startup = std::max(data.startup, 0);
+            const float unit = (right - left) / static_cast<float>(std::max(startup + span, 1));
+            const float boundary = left + startup * unit;
+            draw->AddRectFilled(ImVec2(left, barY), ImVec2(boundary, barY + 8 * scale), color(116, 128, 150), 2 * scale);
+            if (!data.windows.empty()) {
+                draw->AddLine(ImVec2(boundary, barY + 4 * scale), ImVec2(right, barY + 4 * scale), color(116, 128, 150, 90), scale);
+                for (const auto& part : data.windows) {
+                    if (part.start < 0) continue;
+                    const float from = boundary + part.start * unit;
+                    const float to = boundary + (part.end >= 0 ? part.end : data.observed_frames) * unit;
+                    draw->AddRectFilled(ImVec2(from, barY), ImVec2(to, barY + 8 * scale), color(64, 222, 255, 65), 2 * scale);
+                    if (part.end >= 0)
+                        draw->AddLine(ImVec2(to, barY - 5 * scale), ImVec2(to, barY + 13 * scale), accent, scale);
+                }
+            } else if (!data.ground) {
+            const float windowEnd = data.window_frames > 0 ? boundary + data.window_frames * unit : right;
+            draw->AddRectFilled(ImVec2(boundary, barY), ImVec2(windowEnd, barY + 8 * scale), color(64, 222, 255, 65), 2 * scale);
+            if (data.window_frames > 0)
+                draw->AddLine(ImVec2(windowEnd, barY - 5 * scale), ImVec2(windowEnd, barY + 13 * scale), accent, scale);
+            else for (float tick = boundary; tick < right; tick += 12 * scale)
+                draw->AddLine(ImVec2(tick, barY + 4 * scale), ImVec2(std::min(tick + 6 * scale, right), barY + 4 * scale), accent, 2 * scale);
+            }
+            draw->AddLine(ImVec2(boundary, barY - 5 * scale), ImVec2(boundary, barY + 13 * scale), color(240, 245, 255), scale);
+            if (data.input_frame >= 0) {
+                const float marker = boundary + data.input_frame * unit;
+                draw->AddLine(ImVec2(marker, barY - 4 * scale), ImVec2(marker, barY + 12 * scale), color(255, 228, 92), 2 * scale);
+            }
+            if (data.break_frame >= 0) {
+                const float marker = boundary + data.break_frame * unit;
+                draw->AddTriangleFilled(ImVec2(marker, barY - 2 * scale), ImVec2(marker - 5 * scale, barY - 10 * scale),
+                    ImVec2(marker + 5 * scale, barY - 10 * scale), accent);
+            }
+            if (style == 1) {
+                text(16, 84, data.break_frame >= 0 ? std::format("ACCEPTED +{}f", data.break_frame) : "ACCEPTED --", accent, 14);
+                text(245, 84, data.animation_frame >= 0 ? std::format("ANIMATION +{}f", data.animation_frame) : "ANIMATION --", color(175, 185, 203), 14);
+                continue;
+            }
+            text(16, 100, std::format("INPUT {}", input), color(255, 228, 92), 16);
+            text(180, 100, data.break_frame >= 0 ? std::format("BREAK ACCEPTED +{}f", data.break_frame) :
+                "BREAK ACCEPTED --", accent, 16);
+            text(450, 100, data.animation_frame >= 0 ? std::format("ANIMATION +{}f", data.animation_frame) :
+                data.startup > 0 && windowExtent > 0 ? std::format("TOTAL {}f", data.startup + windowExtent) :
+                "TOTAL ?", color(175, 185, 203), 13);
+        }
+    }
+
     struct FlyingText {
         uint64_t id;
         std::string text;
@@ -275,6 +407,7 @@ namespace overlay {
 
         // ��������� � ������ ��� ������
         UpdateAndDraw(io, font);
+        DrawThrowTimelines(io, font);
 
         ImGui::End();
     }

@@ -176,6 +176,8 @@
     <ClInclude Include="TekkenBot\ActionFrameStore.h" />
     <ClInclude Include="TekkenBot\GameReader.h" />
     <ClInclude Include="TekkenBot\GameSnapshot.h" />
+    <ClInclude Include="TekkenBot\ThrowTimeline.h" />
+    <ClInclude Include="TekkenBot\ThrowMetadata.h" />
     <ClInclude Include="TekkenBot\SpatialPosition.h" />
     <ClInclude Include="TekkenBot\MoveInfoEnums.h" />
   </ItemGroup>

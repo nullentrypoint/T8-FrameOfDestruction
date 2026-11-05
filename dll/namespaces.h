@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "TekkenBot/GameSnapshot.h"
+#include "TekkenBot/ThrowTimeline.h"
 
 namespace globals {
         extern HMODULE mainModule;
@@ -179,6 +180,10 @@ struct HitRingSettings {
 };
 
 struct FrameAdvantageHints {
+    bool throwTimeline = true;
+    int throwCardStyle = 0; // Detailed, Compact, Minimal
+    float throwCardDuration = 5.0f;
+    float throwCardFade = 1.0f;
     bool enabled = true;
     int startPositionMode = 1; // 0: random screen center, 1: contact / attack hitbox
     bool lockToWorld = true;
@@ -205,6 +210,8 @@ namespace menu {
 }
 
 namespace overlay {
+    void UpdateThrowTimeline(int side, const ThrowTimeline& timeline);
+    void ClearThrowTimelines();
     extern bool isOpen;
     extern void Init(ImGuiIO& io, ImFont* font);
     extern uint64_t AddFlyingText(const std::string& text,

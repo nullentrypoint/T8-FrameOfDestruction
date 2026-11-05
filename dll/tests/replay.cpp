@@ -12,6 +12,8 @@ namespace console {
     void AddLogError(const std::string& text) { throw std::runtime_error(text); }
 }
 namespace overlay {
+    void UpdateThrowTimeline(int, const ThrowTimeline&) {}
+    void ClearThrowTimelines() {}
     static uint64_t next_id = 0;
     static std::map<uint64_t, std::string> texts;
     uint64_t AddFlyingText(const std::string& text, const std::optional<ScreenAnchor>&, const std::string&,
