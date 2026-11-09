@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "VoiceChat/VoicePresentation.h"
 #include "TekkenBot/GameLog.h"
 #include "TekkenBot/GameReader.h"
 #include "helper.h"
@@ -145,7 +146,7 @@ namespace d3d12hook {
             overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
             if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
             const std::string menuFontPath = helper::GetWindowsDir() + "\\Fonts\\consola.ttf";
-            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f);
+            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
             if (!menuFont) menuFont = io.Fonts->Fonts[0];
             msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
 
@@ -201,10 +202,13 @@ namespace d3d12hook {
                 if (gameReader) {
                     try {
                         gameLog.update(gameReader);
+                        const auto localP1 = gameReader->read_local_is_p1();
+                        VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
                         overlay::SetCamera(gameReader->read_camera());
                     }
                     catch (const std::runtime_error& e) {
                         console::AddLogError(std::format("gameReader update: {}", e.what()));
+                        VoiceChat::localPlayerSlot = -1;
                     }
                 }
                 overlay::Init(io, overlayFont);
@@ -414,7 +418,7 @@ namespace d3d12hook {
             overlayFont = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 100.0f, NULL);
             if (!overlayFont) overlayFont = io.Fonts->Fonts[0];
             const std::string menuFontPath = helper::GetWindowsDir() + "\\Fonts\\consola.ttf";
-            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f);
+            menuFont = io.Fonts->AddFontFromFileTTF(menuFontPath.c_str(), 100.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
             if (!menuFont) menuFont = io.Fonts->Fonts[0];
             msdftext::Initialize(gDevice, desc.BufferDesc.Format, fontPath);
 
@@ -454,10 +458,13 @@ namespace d3d12hook {
                 if (gameReader) {
                     try {
                         gameLog.update(gameReader);
+                        const auto localP1 = gameReader->read_local_is_p1();
+                        VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
                         overlay::SetCamera(gameReader->read_camera());
                     }
                     catch (const std::runtime_error& e) {
                         console::AddLogError(std::format("gameReader update: {}", e.what()));
+                        VoiceChat::localPlayerSlot = -1;
                     }
                 }
                 overlay::Init(io, overlayFont);

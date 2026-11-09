@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include "VoiceChat/SteamDiagnostics.h"
+#include "VoiceChat/SteamPeerTrace.h"
+#include "VoiceChat/SteamProfileTrace.h"
 
 static bool WaitForInitialization(int attempts = 50, int sleepMs = 100)
 {
@@ -68,6 +71,15 @@ static HMODULE WINAPI hookLoadLibraryW(LPCWSTR lpLibFileName)
 static DWORD WINAPI UninjectThread(LPVOID)
 {
     DebugLog("[DllMain] Uninject thread starting.\n");
+    if (SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
+        DebugLog("[DllMain] Steam trace is pinned; exit the game to unload.\n");
+        return 0;
+    }
+    SteamDiagnostics::Stop();
+    if (SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
+        DebugLog("[DllMain] Steam trace is pinned; exit the game to unload.\n");
+        return 0;
+    }
     if (globals::activeBackend == globals::Backend::DX12)
         d3d12hook::release();
     mousehooks::Remove();
@@ -95,6 +107,7 @@ static DWORD WINAPI onAttach(LPVOID)
         return 1;
     }
 
+    SteamDiagnostics::Start();
     TryInitDX12();
 
     HMODULE k32 = GetModuleHandleA("kernel32.dll");

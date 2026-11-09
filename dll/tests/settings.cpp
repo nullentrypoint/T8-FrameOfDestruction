@@ -1,5 +1,6 @@
 // Real settings load/save/reset roundtrip, isolated from the user's INI.
 #include "stdafx.h"
+#include "VoiceChat/VoiceAudio.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -58,10 +59,37 @@ int main() {
     kv::userSettings = &config;
     menu::LoadSettings(); // No keys: defaults must match reset defaults.
     checkDefaults();
-    customize(); menu::SaveAllSettings();
+    customize(); VoiceChat::microphoneHotkey = VK_F8;
+    VoiceChat::voiceEnabled = false;
+    VoiceChat::microphoneMuted = true;
+    VoiceChat::microphoneTest = true;
+    VoiceChat::microphoneGain = 235;
+    VoiceChat::preferredMicrophone = "USB microphone";
+    menu::SaveAllSettings();
     ini::Config loaded(path.string()); loaded.Read(); kv::userSettings = &loaded;
     menu::frameAdvantageHints = FrameAdvantageHints{};
+    VoiceChat::microphoneHotkey = 0;
+    VoiceChat::voiceEnabled = true;
+    VoiceChat::microphoneMuted = false;
+    VoiceChat::microphoneTest = false;
+    VoiceChat::microphoneGain = 100;
+    VoiceChat::preferredMicrophone.clear();
     menu::LoadSettings();
+    assert(VoiceChat::microphoneHotkey == VK_F8);
+    assert(!VoiceChat::voiceEnabled && VoiceChat::microphoneMuted && !VoiceChat::microphoneTest);
+    assert(VoiceChat::microphoneGain == 235 && VoiceChat::preferredMicrophone == "USB microphone");
+    VoiceChat::microphones = {{WAVE_MAPPER, "System default"}, {7, "USB microphone"}};
+    VoiceChat::ResolveMicrophone();
+    assert(VoiceChat::microphoneDevice == 7); // Resolve by name, not the previous index.
+    VoiceChat::microphones = {{WAVE_MAPPER, "System default"}, {2, "Other microphone"}};
+    VoiceChat::ResolveMicrophone();
+    assert(VoiceChat::microphoneDevice == WAVE_MAPPER && VoiceChat::preferredMicrophone.empty());
+    assert(VoiceChat::voiceSettingsDirty.exchange(false));
+    menu::SaveAllSettings();
+    loaded.Read();
+    VoiceChat::preferredMicrophone = "USB microphone";
+    menu::LoadSettings();
+    assert(VoiceChat::preferredMicrophone.empty() && VoiceChat::microphoneDevice == WAVE_MAPPER);
     assert(!menu::frameAdvantageHints.enabled && menu::frameAdvantageHints.startPositionMode == 0);
     assert(menu::frameAdvantageHints.debugInfo && !menu::frameAdvantageHints.lockToWorld);
     for (auto rgb : colors(menu::frameAdvantageHints)) for (int c = 0; c < 3; ++c) assert(rgb[c] == .25f);

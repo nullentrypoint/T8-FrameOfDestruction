@@ -1,6 +1,8 @@
 // Headless resolution-switch regression check using the real menu and ImGui.
 #include "stdafx.h"
 #include "imgui/imgui_internal.h"
+#include "VoiceChat/VoiceAudio.h"
+#include "VoiceChat/VoicePresentation.h"
 #include <cassert>
 #include <iostream>
 
@@ -51,7 +53,16 @@ int main() {
     frame(3840, 2160);
     ImGui::SetWindowPos(window, ImVec2(3500, 1900));
     menu::isOpen = false;
+    VoiceChat::microphoneTest = true;
     frame(800, 600);
+    assert(!VoiceChat::microphoneTest);
+    for (int phase = 0; phase < 5; ++phase) {
+        VoiceChat::avatarPreviewUntil = GetTickCount64() + 10000 - phase * 2000;
+        frame(1920, 1080);
+        assert(ImGui::GetDrawData()->TotalVtxCount > 0);
+        assert(!VoiceChat::peerView.connected);
+    }
+    VoiceChat::avatarPreviewUntil = 0;
     menu::isOpen = true;
     frame(800, 600);
     frame(2560, 1080);

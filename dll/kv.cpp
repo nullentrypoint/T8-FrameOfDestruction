@@ -9,6 +9,7 @@
 #include <filesystem>
 #include "namespaces.h"
 #include "helper.h"
+#include "VoiceChat/PeerPreferences.h"
 
 namespace kv {
     ini::Config* userSettings;
@@ -22,6 +23,7 @@ namespace kv {
             }
             userSettings = new ini::Config(settingsPath);
             userSettings->Read();
+            VoiceChat::peerPreferences.Configure(settingsPath);
         }
         catch (const std::runtime_error& e) {
             throw std::runtime_error(std::format("userSettings->Read: {}", e.what()));

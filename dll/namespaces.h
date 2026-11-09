@@ -114,6 +114,8 @@ struct FrameAdvantageHints {
 
 namespace menu {
     extern bool isOpen;
+    // May be called by workers; delivered to ImGui on the rendering thread.
+    void QueueNotification(std::string title, std::string detail, double duration = 8.0);
     extern void Init(ImGuiIO& io, ImFont* notificationFont = nullptr);
     extern void LoadSettings();
     extern FrameAdvantageHints frameAdvantageHints;

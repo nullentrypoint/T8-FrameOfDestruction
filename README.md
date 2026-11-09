@@ -19,7 +19,7 @@ This software is intended for educational purposes only.
 1. Download and install [Visual C++ v14 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe)
 2. Download latest [release](https://github.com/nullentrypoint/T8-FrameOfDestruction/releases)
 3. Extract the archive into `TEKKEN 8\Polaris\Binaries\Win64\`, next to `Polaris-Win64-Shipping.exe`.
-4. Run the game normally; the ASI plugin loads automatically. See the included `readme.txt` for Russian and English instructions.
+4. Run the game normally; the ASI plugin loads automatically. See the included `readme.txt` for instructions.
 
 Press ```F1``` in game to open menu. 
 

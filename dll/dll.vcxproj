@@ -127,6 +127,11 @@
     <ClCompile Include="console.cpp" />
     <ClCompile Include="d3d12hook.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="VoiceChat\SteamDiagnostics.cpp" />
+    <ClCompile Include="VoiceChat\SteamPeerTrace.cpp" />
+    <ClCompile Include="VoiceChat\SteamProfileTrace.cpp" />
+    <ClCompile Include="VoiceChat\PlayerIdentityReader.cpp" />
+    <ClCompile Include="VoiceChat\SteamChannelProbe.cpp" />
     <ClCompile Include="globals.cpp" />
     <ClCompile Include="helper.cpp" />
     <ClCompile Include="hooks.cpp" />

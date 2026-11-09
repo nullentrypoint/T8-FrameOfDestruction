@@ -6,12 +6,15 @@
 #include <functional>
 #include "namespaces.h"
 #include "helper.h"
+#include "VoiceChat/VoicePresentation.h"
 #include <format>
+#include <mutex>
 
 namespace console {
     bool isOpen = false;
     char inputBuf[256] = "";
     std::vector<std::string> items;
+    static std::mutex logMutex;
     std::vector<std::string> history;
     int historyPos = -1;
     bool scrollToBottom = false;
@@ -95,17 +98,32 @@ namespace console {
     }
 
     void AddLog(const std::string& str) {
-        items.push_back(str);
+        SYSTEMTIME time{};
+        GetLocalTime(&time);
+        const auto prefix = std::format("[{:02}:{:02}:{:02}.{:03}] ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
+        std::lock_guard lock(logMutex);
+        size_t begin = 0;
+        do {
+            const auto end = str.find('\n', begin);
+            auto line = str.substr(begin, end == std::string::npos ? end : end - begin);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.size() > 4096) line = line.substr(0, 4096) + " [truncated]";
+            if (items.size() >= 1000) items.erase(items.begin());
+            items.push_back(prefix + line);
+            if (end == std::string::npos) break;
+            begin = end + 1;
+        } while (begin < str.size());
         scrollToBottom = true;
     }
 
     void AddLogError(const std::string& str) {
-        items.push_back("error: " + str);
-        scrollToBottom = true;
+        AddLog("[ERROR] " + str);
     }
 
     void ClearLog() {
+        std::lock_guard lock(logMutex);
         items.clear();
+        scrollToBottom = false;
     }
 
     void ExecCommand(const std::string& commandLine) {
@@ -166,6 +184,10 @@ namespace console {
     void DrawConsoleContent() {
         // ������������ �������
         commands["clear"] = [](const std::vector<std::string>&) { ClearLog(); };
+        commands["voice_preview"] = [](const std::vector<std::string>&) {
+            VoiceChat::avatarPreviewUntil = GetTickCount64() + 10000;
+            AddLog("Voice avatar preview: 10 seconds. Drag either avatar with the left mouse button; the other mirrors it. Keep the menu open for mouse input. Final coordinates will be logged.");
+        };
         commands["help"] = [](const std::vector<std::string>&) {
             console::AddLog("available commands:");
             for (const auto& cmd : console::commands) {
@@ -210,14 +232,24 @@ namespace console {
         ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footerHeightToReserve), false, ImGuiWindowFlags_HorizontalScrollbar);
 
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 1));
-        for (const auto& item : items) {
-            ImGui::TextWrapped(item.c_str());
+        std::vector<std::string> snapshot;
+        bool scroll = false;
+        {
+            std::lock_guard lock(logMutex);
+            snapshot = items;
+            scroll = scrollToBottom;
+            scrollToBottom = false;
+        }
+        for (const auto& item : snapshot) {
+            const bool error = item.find("[ERROR]") != std::string::npos;
+            if (error) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, .35f, .35f, 1));
+            ImGui::TextWrapped("%s", item.c_str());
+            if (error) ImGui::PopStyleColor();
         }
         ImGui::PopStyleVar();
 
-        if (scrollToBottom) {
+        if (scroll) {
             ImGui::SetScrollHereY(1.0f);
-            scrollToBottom = false;
         }
         ImGui::EndChild();
 

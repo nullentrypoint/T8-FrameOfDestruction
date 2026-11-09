@@ -52,6 +52,16 @@ public:
 
     const std::string& get_action_frame_path() const { return action_frame_path; }
 
+    // Same side mapping used to normalize the frame-data player snapshots.
+    // Do not assume P1 when the game has not populated this field yet.
+    std::optional<bool> read_local_is_p1() {
+        try {
+            const auto side = get_8_bytes_at_end_of_pointer_trail(c.at("NonPlayerDataAddresses").at("opponent_side"));
+            if (side <= 1) return side == 1;
+        } catch (...) {}
+        return std::nullopt;
+    }
+
     static uint64_t bytes_to_int(const std::vector<uint8_t>& b) {
         uint64_t result = 0;
         for (auto byte : b) {
