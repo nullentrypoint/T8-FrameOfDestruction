@@ -3,6 +3,7 @@
 using Microsoft::WRL::ComPtr;
 
 namespace hooks {
+    void Remove();
     // VTable indices derived from the official DirectX interface order.
     // These values are stable across Windows versions and SDKs.
     constexpr size_t kPresentIndex  = 8;            // IDXGISwapChain::Present
@@ -124,7 +125,7 @@ namespace hooks {
         return S_OK;
     }
 
-    void Init() {
+    bool Init() {
         DebugLog("[hooks] Init starting\n");
         DebugLog(
             "[hooks] VTable indices - Present:%zu Present1:%zu ResizeBuffers:%zu ExecuteCmdLists:%zu\n",
@@ -136,10 +137,11 @@ namespace hooks {
 
         if (FAILED(CreateDeviceAndSwapChain())) {
             DebugLog("[hooks] Failed to create dummy device/swapchain.\n");
-            return;
+            return false;
         }
 
         MH_STATUS mh;
+        bool created = true;
 
         // --- Hook Present on SwapChain ---
         auto scVTable = *reinterpret_cast<void***>(pSwapChain.Get());
@@ -151,6 +153,7 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present failed: %s\n", MH_StatusToString(mh));
+        created &= mh == MH_OK;
 
         pPresent1Target = reinterpret_cast<LPVOID>(scVTable[kPresent1Index]);
         mh = MH_CreateHook(
@@ -160,6 +163,7 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present1 failed: %s\n", MH_StatusToString(mh));
+        created &= mh == MH_OK;
 
         // --- Hook ResizeBuffers ---
         pResizeBuffersTarget = reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]);
@@ -170,6 +174,7 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook ResizeBuffers failed: %s\n", MH_StatusToString(mh));
+        created &= mh == MH_OK;
 
         // --- Hook ExecuteCommandLists ---
         auto cqVTable = *reinterpret_cast<void***>(pCommandQueue.Get());
@@ -181,11 +186,20 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook ExecuteCommandLists failed: %s\n", MH_StatusToString(mh));
+        created &= mh == MH_OK;
+
+        if (!created) {
+            Remove();
+            return false;
+        }
 
         // --- Enable all hooks ---
         mh = MH_EnableHook(MH_ALL_HOOKS);
-        if (mh != MH_OK)
+        if (mh != MH_OK) {
             DebugLog("[hooks] MH_EnableHook failed: %s\n", MH_StatusToString(mh));
+            Remove();
+            return false;
+        }
         else
             DebugLog(
                 "[hooks] Hooks enabled. Present@%p (idx=%zu), Present1@%p (idx=%zu), Resize@%p (idx=%zu), Exec@%p (idx=%zu)\n",
@@ -194,6 +208,7 @@ namespace hooks {
                 reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]), kResizeBuffersIndex,
                 reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]), kExecuteCommandListsIndex
             );
+        return true;
     }
 
     void Remove()

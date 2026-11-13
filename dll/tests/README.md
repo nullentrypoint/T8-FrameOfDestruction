@@ -1,5 +1,19 @@
 # Frame advantage replay checks
 
+## Memory reader crash regression
+
+From `dll/` in an x64 Visual Studio developer prompt (assertions enabled):
+
+```bat
+cl /nologo /std:c++20 /EHsc /MD /I. tests\reader_memory.cpp TekkenBot\MoveInfoEnums.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_reader_memory.exe /link /OPT:REF
+%TEMP%\t8_reader_memory.exe
+```
+
+Exercises valid reads, the reported `0xffffffffffffffff` address, inaccessible
+pages, reads across a protected page boundary, freed memory, and short frame
+buffers. Checks that a failed read logs an update instruction once and disables
+subsequent game-data reads. Uses a temporary config; no game required.
+
 ## Menu layout check
 
 From `dll/` in an x64 Visual Studio developer prompt (keep assertions enabled):

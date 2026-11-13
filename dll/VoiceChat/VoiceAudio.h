@@ -114,7 +114,7 @@ public:
         microphones = std::move(list);
         ResolveMicrophone();
     }
-    void Update(bool connected) {
+    void Update(bool connected, bool peerMuted = false) {
         Enumerate();
         const bool test = microphoneTest.load();
         if (test != wasTest) { Stop(); wasTest = test; }
@@ -132,7 +132,7 @@ public:
                 if (waveOutPrepareHeader(output, &b.header, sizeof(WAVEHDR))) { Stop(); Error("Playback buffer error"); retryAt = GetTickCount64() + 3000; return; }
             }
         }
-        if (microphoneMuted && !test) {
+        if ((microphoneMuted || peerMuted) && !test) {
             captureActive = false;
             microphoneLevel = 0;
             if (input) { // Reset discards captured speech immediately on mute.

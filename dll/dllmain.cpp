@@ -3,81 +3,31 @@
 #include "VoiceChat/SteamPeerTrace.h"
 #include "VoiceChat/SteamProfileTrace.h"
 
-static bool WaitForInitialization(int attempts = 50, int sleepMs = 100)
-{
-    for (int i = 0; i < attempts; ++i)
-    {
-        if (d3d12hook::IsInitialized())
-            return true;
-        Sleep(sleepMs);
-    }
-    return false;
-}
-
 static bool TryInitDX12()
 {
     if (!GetModuleHandleA("d3d12.dll") && !GetModuleHandleA("dxgi.dll"))
         return false;
 
     DebugLog("[DllMain] Attempting DX12 initialization.\n");
-    hooks::Init();
-    if (WaitForInitialization())
-    {
-        DebugLog("[DllMain] DX12 initialization succeeded.\n");
-        globals::activeBackend = globals::Backend::DX12;
-        return true;
-    }
-    DebugLog("[DllMain] DX12 initialization failed.\n");
-    d3d12hook::release();
-    return false;
-}
-
-using LoadLibraryA_t = HMODULE(WINAPI*)(LPCSTR);
-using LoadLibraryW_t = HMODULE(WINAPI*)(LPCWSTR);
-static LoadLibraryA_t oLoadLibraryA = nullptr;
-static LoadLibraryW_t oLoadLibraryW = nullptr;
-
-// Support DX12 loaded after injection.
-static void InitForModule(const char* name)
-{
-    if (!name || globals::activeBackend == globals::Backend::DX12)
-        return;
-    const char* base = strrchr(name, '\\');
-    base = base ? base + 1 : name;
-    if (_stricmp(base, "d3d12.dll") == 0 || _stricmp(base, "dxgi.dll") == 0)
-        TryInitDX12();
-}
-
-static HMODULE WINAPI hookLoadLibraryA(LPCSTR lpLibFileName)
-{
-    HMODULE mod = oLoadLibraryA(lpLibFileName);
-    if (mod)
-        InitForModule(lpLibFileName);
-    return mod;
-}
-
-static HMODULE WINAPI hookLoadLibraryW(LPCWSTR lpLibFileName)
-{
-    HMODULE mod = oLoadLibraryW(lpLibFileName);
-    if (mod && lpLibFileName)
-    {
-        char name[MAX_PATH];
-        if (WideCharToMultiByte(CP_ACP, 0, lpLibFileName, -1, name, MAX_PATH, nullptr, nullptr))
-            InitForModule(name);
-    }
-    return mod;
+    if (!hooks::Init()) return false;
+    // Installing hooks and rendering the first frame are separate milestones.
+    // Atlas generation/loading can take arbitrarily long. Never tear down the
+    // render thread's resources just because it has not finished yet.
+    globals::activeBackend = globals::Backend::DX12;
+    DebugLog("[DllMain] DX12 hooks installed; waiting for Present.\n");
+    return true;
 }
 
 static DWORD WINAPI UninjectThread(LPVOID)
 {
     DebugLog("[DllMain] Uninject thread starting.\n");
-    if (SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
-        DebugLog("[DllMain] Steam trace is pinned; exit the game to unload.\n");
+    if (SteamDiagnostics::IsSteamShuttingDown() || SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
+        DebugLog("[DllMain] Steam shutdown or pinned trace is active; exit the game to unload.\n");
         return 0;
     }
     SteamDiagnostics::Stop();
-    if (SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
-        DebugLog("[DllMain] Steam trace is pinned; exit the game to unload.\n");
+    if (SteamDiagnostics::IsSteamShuttingDown() || SteamDiagnostics::PeerTrace::IsPinned() || SteamDiagnostics::ProfileTrace::IsPinned()) {
+        DebugLog("[DllMain] Steam shutdown or pinned trace is active; exit the game to unload.\n");
         return 0;
     }
     if (globals::activeBackend == globals::Backend::DX12)
@@ -108,24 +58,10 @@ static DWORD WINAPI onAttach(LPVOID)
     }
 
     SteamDiagnostics::Start();
-    TryInitDX12();
-
-    HMODULE k32 = GetModuleHandleA("kernel32.dll");
-    if (k32) {
-        LPVOID addrA = GetProcAddress(k32, "LoadLibraryA");
-        LPVOID addrW = GetProcAddress(k32, "LoadLibraryW");
-        if (addrA) {
-            MH_CreateHook(addrA, reinterpret_cast<LPVOID>(hookLoadLibraryA), reinterpret_cast<LPVOID*>(&oLoadLibraryA));
-            MH_EnableHook(addrA);
-            DebugLog("[DllMain] Hooked LoadLibraryA@%p\n", addrA);
-        }
-        if (addrW) {
-            MH_CreateHook(addrW, reinterpret_cast<LPVOID>(hookLoadLibraryW), reinterpret_cast<LPVOID*>(&oLoadLibraryW));
-            MH_EnableHook(addrW);
-            DebugLog("[DllMain] Hooked LoadLibraryW@%p\n", addrW);
-        }
-    }
     mousehooks::Init();
+    // Retry on this worker only, including when DX12 loads after injection.
+    // LoadLibrary callbacks can re-enter initialization on arbitrary threads.
+    while (!TryInitDX12()) Sleep(1000);
     DebugLog("[DllMain] Hook initialization completed.\n");
     return 0;
 }
@@ -143,6 +79,10 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
         }
         break;
     case DLL_PROCESS_DETACH:
+        // Process termination has already stopped other threads. GPU/Steam and
+        // CRT locks may no longer be usable; let the OS reclaim these resources.
+        // Explicit F11 unload performs its cleanup on UninjectThread instead.
+        if (lpReserved) return TRUE;
         DebugLog("[DllMain] DLL_PROCESS_DETACH. Releasing hooks and uninitializing MinHook.\n");
         if (globals::activeBackend == globals::Backend::DX12)
             d3d12hook::release();

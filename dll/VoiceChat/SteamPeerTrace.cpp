@@ -1,5 +1,6 @@
 #include "../stdafx.h"
 #include "SteamPeerTrace.h"
+#include "MemoryLayout.h"
 #include "PeerCounters.h"
 #include <intrin.h>
 #ifdef T8_PEER_TRACE_TEST
@@ -11,6 +12,7 @@ namespace {
     using Send = bool(__fastcall*)(void*, uint64_t, const void*, uint32_t, int, int);
     Send original = nullptr;
     uintptr_t executable = 0;
+    uintptr_t returnSiteA = 0, returnSiteB = 0;
     std::atomic<bool> pinned{false};
     PeerCounters counters;
     std::array<PeerCounter, 64> previous{};
@@ -31,7 +33,7 @@ namespace {
         const auto site = caller - executable;
         ++totalCalls;
         const bool result = original(self, remote, data, size, mode, channel);
-        if (site == 0x698887E || site == 0x6988901)
+        if (site == returnSiteA || site == returnSiteB)
             ++knownSiteCalls;
         // Include unanticipated callers: otherwise an empty log cannot distinguish
         // an unused method from an incomplete static call-site filter.
@@ -45,16 +47,17 @@ namespace {
     }
 }
 
-bool Install(uintptr_t base, uintptr_t networkingInterface) {
+bool Install(uintptr_t base, uintptr_t networkingInterface, const VoiceChat::MemoryLayout& layout) {
     if (pinned.load()) return true;
+    if (!layout.peerCallA || !layout.peerCallB || !layout.peerMethod) return false;
     // Validate actual argument setup and indirect calls, not just their RVAs.
     const unsigned char siteA[] = {
         0x48,0x8B,0x08, 0x48,0x8B,0x57,0x10, 0x48,0x8B,0x01, 0xFF,0x10};
     const unsigned char siteB[] = {
         0x48,0x8B,0x53,0x10, 0x48,0x8B,0x08, 0xC7,0x44,0x24,0x20,0,0,0,0,
         0x48,0x8B,0x01, 0xFF,0x10};
-    if (!Match(base + 0x6988872, siteA, sizeof(siteA)) ||
-        !Match(base + 0x69888ED, siteB, sizeof(siteB))) return false;
+    if (!Match(base + layout.peerCallA, siteA, sizeof(siteA)) ||
+        !Match(base + layout.peerCallB, siteB, sizeof(siteB))) return false;
     uintptr_t vtable = 0, method = 0;
     if (!Read(networkingInterface, &vtable, sizeof(vtable)) ||
         !Read(vtable, &method, sizeof(method))) return false;
@@ -62,7 +65,7 @@ bool Install(uintptr_t base, uintptr_t networkingInterface) {
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCWSTR>(method), &owner) || owner != GetModuleHandleW(L"steamclient64.dll")) return false;
     // Match the inspected client's slot as well as the validated game context.
-    if (method - reinterpret_cast<uintptr_t>(owner) != 0x71E600) return false;
+    if (method - reinterpret_cast<uintptr_t>(owner) != layout.peerMethod) return false;
     auto target = reinterpret_cast<void*>(method);
     if (MH_CreateHook(target, reinterpret_cast<void*>(&SendHook), reinterpret_cast<void**>(&original)) != MH_OK)
         return false;
@@ -77,6 +80,8 @@ bool Install(uintptr_t base, uintptr_t networkingInterface) {
     }
     pinned.store(true);
     executable = base;
+    returnSiteA = layout.peerCallA + sizeof(siteA);
+    returnSiteB = layout.peerCallB + sizeof(siteB);
     if (MH_EnableHook(target) != MH_OK) {
         MH_RemoveHook(target);
         original = nullptr;
@@ -94,7 +99,7 @@ void Flush(void (*log)(const char*, ...)) {
         const auto& entry = snapshot[i];
         if (entry.calls == previous[i].calls) continue;
         const auto site = entry.callsite - executable;
-        const bool known = site == 0x698887E || site == 0x6988901;
+        const bool known = site == returnSiteA || site == returnSiteB;
         log("peer-send candidate=%llu channel=%d mode=%d callerVA=0x%llX knownGameSite=%d calls=%llu accepted=%llu bytes=%llu",
             static_cast<unsigned long long>(entry.peer), entry.channel, entry.mode,
             static_cast<unsigned long long>(entry.callsite), known, static_cast<unsigned long long>(entry.calls),

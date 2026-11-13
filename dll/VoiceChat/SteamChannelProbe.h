@@ -6,7 +6,7 @@ namespace VoiceChat {
 class SteamChannelProbe {
 public:
     using Log = void(*)(const char*, ...);
-    explicit SteamChannelProbe(Log log);
+    SteamChannelProbe(Log log, uintptr_t userInitializerRva);
     ~SteamChannelProbe();
     SteamChannelProbe(const SteamChannelProbe&) = delete;
     SteamChannelProbe& operator=(const SteamChannelProbe&) = delete;

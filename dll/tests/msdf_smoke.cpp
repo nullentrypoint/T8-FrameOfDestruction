@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
     Check(device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
     char windows[MAX_PATH]; GetWindowsDirectoryA(windows, MAX_PATH);
     const std::string font = std::string(windows) + "\\Fonts\\consolab.ttf";
+    assert(!msdftext::Initialize(nullptr, Format, font));
     assert(msdftext::Initialize(device.Get(), Format, font));
     auto draw = [&](float outline, float alpha, const char* text = "+9 -26 0") {
         Check(allocator->Reset()); Check(list->Reset(allocator.Get(), nullptr));

@@ -25,16 +25,16 @@ struct IdentitySnapshot {
 };
 
 struct IdentityLayout {
-    uintptr_t rootRva = 0x9B8CB70;
-    uintptr_t vtableRva = 0x855C2C8;
-    uintptr_t destructorRva = 0x5BF31F0;
+    uintptr_t rootRva = 0;
+    uintptr_t vtableRva = 0;
+    uintptr_t destructorRva = 0;
 };
 
 using IdentityMemoryRead = bool(*)(void* context, uintptr_t address, void* output, size_t size);
 
 class PlayerIdentityReader {
 public:
-    explicit PlayerIdentityReader(uintptr_t moduleBase);
+    PlayerIdentityReader(uintptr_t moduleBase, IdentityLayout layout);
     PlayerIdentityReader(uintptr_t moduleBase, IdentityMemoryRead read, void* context, IdentityLayout layout = {});
     IdentitySnapshot Read() const;
 private:

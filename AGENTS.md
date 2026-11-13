@@ -19,6 +19,7 @@
 - The compiled ImGui backends are `dll/imgui/imgui_impl_*.cpp`, **not** the duplicate files under `dll/imgui/backends/`. ImGui's examples, workflows, and formatter config belong to the vendored library.
 
 ## Focused verification
+- For game-version address migrations, load the project skill `update-tekken-addresses` at `.opencode/skills/update-tekken-addresses/SKILL.md`. It covers frame/throw/spatial memory, voice RVAs, CE capture validation, replay checks, and deployment.
 - The headless replay harness is outside the Visual Studio projects. From `dll/`, in an x64 developer **cmd** prompt:
   ```bat
   cl /nologo /std:c++20 /EHsc /MD /I. tests\replay.cpp TekkenBot\MoveInfoEnums.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_replay.exe /link /OPT:REF

@@ -4,6 +4,7 @@
 #include "TekkenBot/GameReader.h"
 #include "helper.h"
 #include "msdf_text.h"
+#include <mutex>
 
 namespace hooks { void Remove(); }
 
@@ -36,7 +37,16 @@ namespace d3d12hook {
     static FrameContext* gFrameContexts = nullptr;
     static bool                   gInitialized = false;
     static bool                   gShutdown = false;
-    static bool                   gAfterFirstPresent = false;
+    static std::mutex gQueueMutex;
+
+    static bool HasCommandQueue(IDXGISwapChain3* swapChain) {
+        std::lock_guard lock(gQueueMutex);
+        if (!gDevice) {
+            const HRESULT hr = swapChain->GetDevice(IID_PPV_ARGS(&gDevice));
+            if (FAILED(hr)) DebugLog("[d3d12hook] GetDevice: hr=0x%08X\n", hr);
+        }
+        return gCommandQueue != nullptr;
+    }
 
     void release();
 
@@ -65,21 +75,12 @@ namespace d3d12hook {
         //    return oPresentD3D12(pSwapChain, SyncInterval, Flags);
         //}
 
-        gAfterFirstPresent = true;
-        if (!gCommandQueue) {
-            DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
-            if (!gDevice) {
-                pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice);
-            }
+        if (!HasCommandQueue(pSwapChain)) {
             return oPresentD3D12(pSwapChain, SyncInterval, Flags);
         }
 
         if (!gInitialized) {
             DebugLog("[d3d12hook] Initializing ImGui on first Present.\n");
-            if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
-                LogHRESULT("GetDevice", E_FAIL);
-                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-            }
 
             // Swap Chain description
             DXGI_SWAP_CHAIN_DESC desc = {};
@@ -329,12 +330,7 @@ namespace d3d12hook {
             return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
         }
 
-        gAfterFirstPresent = true;
-        if (!gCommandQueue) {
-            DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
-            if (!gDevice) {
-                pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice);
-            }
+        if (!HasCommandQueue(pSwapChain)) {
             return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
         }
 
@@ -347,10 +343,6 @@ namespace d3d12hook {
             }
 
             DebugLog("[d3d12hook] Initializing ImGui on first Present1.\n");
-            if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
-                LogHRESULT("GetDevice", E_FAIL);
-                return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
-            }
 
             // Swap Chain description
             DXGI_SWAP_CHAIN_DESC desc = {};
@@ -577,34 +569,22 @@ namespace d3d12hook {
         ID3D12CommandQueue* _this,
         UINT                          NumCommandLists,
         ID3D12CommandList* const* ppCommandLists) {
-        if (!gCommandQueue && gAfterFirstPresent) {
-            ID3D12Device* queueDevice = nullptr;
-            if (SUCCEEDED(_this->GetDevice(__uuidof(ID3D12Device), (void**)&queueDevice))) {
-                if (!gDevice) {
-                    gDevice = queueDevice;
-                }
-
-                if (queueDevice == gDevice) {
-                    D3D12_COMMAND_QUEUE_DESC desc = _this->GetDesc();
-                    DebugLog("[d3d12hook] CommandQueue type=%u\n", desc.Type);
-                    if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+        {
+            std::lock_guard lock(gQueueMutex);
+            // Compute/copy submissions must not consume the capture opportunity:
+            // keep looking until a direct queue for the presenting device appears.
+            if (!gCommandQueue && gDevice && _this->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                ID3D12Device* queueDevice = nullptr;
+                if (SUCCEEDED(_this->GetDevice(IID_PPV_ARGS(&queueDevice)))) {
+                    if (queueDevice == gDevice) {
                         _this->AddRef();
                         gCommandQueue = _this;
                         DebugLog("[d3d12hook] Captured CommandQueue=%p\n", _this);
                     }
-                    else {
-                        DebugLog("[d3d12hook] Skipping capture: non-direct queue\n");
-                    }
-                }
-                else {
-                    DebugLog("[d3d12hook] Skipping capture: CommandQueue uses different device (%p != %p)\n", queueDevice, gDevice);
-                }
-
-                if (queueDevice && queueDevice != gDevice)
                     queueDevice->Release();
+                }
             }
         }
-        gAfterFirstPresent = false;
         oExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
     }
 

@@ -22,7 +22,7 @@ namespace globals {
 }
 
 namespace hooks {
-        extern void Init();
+        bool Init();
 }
 
 namespace inputhook {

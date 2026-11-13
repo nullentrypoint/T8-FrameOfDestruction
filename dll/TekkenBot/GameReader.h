@@ -26,6 +26,14 @@ private:
     uintptr_t module_address;
     HANDLE process_handle;
     bool in_match;
+    bool reading_disabled = false;
+    void disable_reading(const std::string& reason) {
+        if (reading_disabled) return;
+        reading_disabled = true;
+        in_match = false;
+        console::AddLogError("Game memory read failed. The mod may be incompatible with the updated game. "
+            "Update T8FrameOfDestruction and memory_address.ini. Game data reading is disabled until restart. " + reason);
+    }
     std::string action_frame_path;
     struct ThrowCache {
         uintptr_t pointer = 0;
@@ -55,6 +63,7 @@ public:
     // Same side mapping used to normalize the frame-data player snapshots.
     // Do not assume P1 when the game has not populated this field yet.
     std::optional<bool> read_local_is_p1() {
+        if (reading_disabled) return std::nullopt;
         try {
             const auto side = get_8_bytes_at_end_of_pointer_trail(c.at("NonPlayerDataAddresses").at("opponent_side"));
             if (side <= 1) return side == 1;
@@ -91,7 +100,13 @@ public:
         //    return nullptr;
         //}
 
-        return get_game_snapshot(rollback_frame);
+        if (reading_disabled) return nullptr;
+        try {
+            return get_game_snapshot(rollback_frame);
+        } catch (const std::exception& e) {
+            disable_reading(e.what());
+            return nullptr;
+        }
     }
 
     template< typename T >
@@ -113,6 +128,7 @@ public:
     //}
 
     std::shared_ptr<GameSnapshot> get_game_snapshot(int rollback_frame) {
+        if (reading_disabled) return nullptr;
         auto pointers = c["MemoryAddressOffsets"]["player_data_pointer_offset"];
         uintptr_t player_data_base_address;
         try {
@@ -122,6 +138,12 @@ public:
             if (in_match) {
                 finish_match();
             }
+            in_match = false;
+            return nullptr;
+        }
+
+        if (!player_data_base_address) {
+            if (in_match) finish_match();
             in_match = false;
             return nullptr;
         }
@@ -169,6 +191,7 @@ public:
         catch (...) {
             is_player_player_one = true;
         }
+        if (reading_disabled) return nullptr;
 
         if (!is_player_player_one) {
             std::swap(p1_snapshot, p2_snapshot);
@@ -241,6 +264,7 @@ public:
     }
 
     std::optional<CameraSnapshot> read_camera() const {
+        if (reading_disabled) return std::nullopt;
         const auto section = c.find("SpatialCamera");
         if (section == c.end()) return std::nullopt;
         const auto trail = section->second.find("view_state_pointer");
@@ -269,6 +293,8 @@ public:
     }
 
     std::pair<int, std::vector<uint8_t>> get_frame(uintptr_t player_data_base_address, int rollback_frame) {
+        if (rollback_frame < 0 || rollback_frame >= 32)
+            throw std::runtime_error("Invalid rollback frame index");
         int rollback_frame_offset = c["MemoryAddressOffsets"]["rollback_frame_offset"][0];
 
         std::vector<std::pair<int, uintptr_t>> frame_chunk;
@@ -315,36 +341,25 @@ public:
     }
 
     std::vector<uint8_t> get_block_of_data(uintptr_t address, int size_of_block) {
-        //console::AddLog(std::format("get_block_of_data: {} {} {}", address, int_to_hex(address), size_of_block));
-        if (address == 0) {
-            //console::AddLog("Null pointer access attempt");
-            throw std::runtime_error("Null pointer access attempt");
+        if (reading_disabled) throw ReadProcessMemoryException("Game data reading is disabled");
+        if (size_of_block == 0) return {};
+        if (size_of_block < 0) {
+            disable_reading("Invalid memory block size: " + std::to_string(size_of_block));
+            throw ReadProcessMemoryException("Invalid memory block size");
         }
-
-        if (size_of_block == 0) {
-            return std::vector<uint8_t>();
-        }
-
-        // Check if the memory region is accessible
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi))) {
-            if (mbi.Protect == PAGE_NOACCESS || mbi.Protect & PAGE_GUARD) {
-                //console::AddLog("Attempt to read from protected memory");
-                throw std::runtime_error("Attempt to read from protected memory");
-            }
-        }
-
         std::vector<uint8_t> buffer(size_of_block);
-
-        // For internal DLL, we can just do direct memory copy
-        try {
-            memcpy_s(buffer.data(), buffer.size(), reinterpret_cast<const void*>(address), size_of_block);
+        SIZE_T bytes_read = 0;
+        // Unlike memcpy, this safely reports inaccessible memory, including
+        // ranges crossing a page boundary and memory unmapped during the read.
+        const BOOL success = ReadProcessMemory(GetCurrentProcess(),
+            reinterpret_cast<LPCVOID>(address), buffer.data(), buffer.size(), &bytes_read);
+        const DWORD error = success ? ERROR_PARTIAL_COPY : GetLastError();
+        if (!success || bytes_read != buffer.size()) {
+            const auto reason = std::format("Address: 0x{:X}, size: {}, bytes read: {}, Win32 error: {}",
+                address, size_of_block, bytes_read, error);
+            disable_reading(reason);
+            throw ReadProcessMemoryException(reason);
         }
-        catch (...) {
-            //console::AddLog("Memory access violation");
-            throw std::runtime_error("Memory access violation");
-        }
-
         return buffer;
     }
 
@@ -357,12 +372,21 @@ public:
     uint64_t get_8_bytes_at_end_of_pointer_trail(const std::vector<uintptr_t>& trail) {
         uintptr_t address = module_address;
         for (size_t i = 0; i < trail.size(); i++) {
+            // A null chain is normal while loading or outside a match.
+            if (!address) return 0;
+            if (trail[i] > UINTPTR_MAX - address) {
+                disable_reading("Pointer trail address overflow");
+                throw ReadProcessMemoryException("Pointer trail address overflow");
+            }
             address = get_int_from_address(address + trail[i], 8);
         }
         return address;
     }
 
     static int get_4_bytes_from_data_block(const std::vector<uint8_t>& frame, int offset) {
+        if (offset < 0 || static_cast<size_t>(offset) > frame.size() ||
+            frame.size() - static_cast<size_t>(offset) < 4)
+            throw std::runtime_error("Frame field is outside the memory block; check memory_address.ini");
         std::vector<uint8_t> bytes(frame.begin() + offset, frame.begin() + offset + 4);
         std::reverse(bytes.begin(), bytes.end());
         // Preserve signed DWORD fields such as actionable_frame and Heat FA.

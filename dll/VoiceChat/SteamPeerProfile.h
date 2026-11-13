@@ -46,15 +46,25 @@ public:
     void Refresh(PeerView& peer) {
         if (!Available() || !peer.steamId) return;
         // Existing game callback pump fills Steam's persona/avatar cache.
-        request(friends, peer.steamId, false);
+        const bool loading = request(friends, peer.steamId, false);
         if (const char* value = name(friends, peer.steamId); value && *value && strcmp(value, "[unknown]"))
             peer.name.assign(value, strnlen(value, 256));
-        if (peer.avatar) return;
+        // RefreshPeer polls every 500 ms; let the game's callback pump finish
+        // loading first. Recheck even a cached bitmap: it may be a placeholder
+        // or the user may have changed their avatar. Keep the old one on failure.
+        if (loading) return;
         const int image = avatar(friends, peer.steamId);
         uint32_t width = 0, height = 0;
         if (image <= 0 || !size(utils, image, &width, &height) || !width || !height || width > 256 || height > 256) return;
         std::vector<uint8_t> rgba(width * height * 4);
         if (!pixels(utils, image, rgba.data(), static_cast<int>(rgba.size()))) return;
+        if (peer.avatar && peer.avatar->resolution == static_cast<int>(width)) {
+            bool unchanged = true;
+            for (uint32_t y = 0; y < width && unchanged; ++y)
+                unchanged = memcmp(peer.avatar->rgba.data() + y * width * 4,
+                    rgba.data() + (y * height / width) * width * 4, width * 4) == 0;
+            if (unchanged) return;
+        }
         auto result = std::make_shared<Avatar>();
         result->resolution = static_cast<int>(width);
         result->rgba.resize(width * width * 4);

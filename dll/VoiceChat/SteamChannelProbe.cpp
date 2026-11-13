@@ -1,5 +1,6 @@
 #include "../stdafx.h"
 #include "SteamChannelProbe.h"
+#include "SteamDiagnostics.h"
 #include "SteamProbeProtocol.h"
 #include "VoiceAudio.h"
 #include "SteamPeerProfile.h"
@@ -85,7 +86,7 @@ struct SteamChannelProbe::Impl {
         const auto now = GetTickCount64();
         if (now < nextStats) return;
         nextStats = now + 500;
-        if (localPeer.steamId && !localPeer.avatar) {
+        if (localPeer.steamId) {
             profile.Refresh(localPeer);
             std::lock_guard lock(presentationMutex); localView = localPeer;
         }
@@ -126,7 +127,8 @@ struct SteamChannelProbe::Impl {
     int lastSendResult = -1;
     std::string lastBindError;
 
-    explicit Impl(Log logger) : log(logger) {}
+    uintptr_t userInitializerRva = 0;
+    Impl(Log logger, uintptr_t initializer) : log(logger), userInitializerRva(initializer) {}
     ~Impl() {
         Stop();
         if (factoryModule) FreeLibrary(factoryModule);
@@ -148,7 +150,10 @@ struct SteamChannelProbe::Impl {
         // Recover the same two resolved import targets used by the game's
         // SteamUser021 initializer. No basename-based choice among SDK copies.
         const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-        const uintptr_t init = base + 0x5C45550;
+        if (!userInitializerRva || userInitializerRva > UINTPTR_MAX - base) {
+            BindError("Missing or invalid Steam initializer RVA in memory_address.ini."); return false;
+        }
+        const uintptr_t init = base + userInitializerRva;
         unsigned char code[33]{};
         const unsigned char prefix[] = {0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xFF,0x15};
         if (!Read(init, code, sizeof(code)) || memcmp(code, prefix, sizeof(prefix)) ||
@@ -180,6 +185,9 @@ struct SteamChannelProbe::Impl {
         if (GetProcAddress(userOwner, "SteamAPI_GetHSteamUser") != reinterpret_cast<FARPROC>(userTarget) ||
             GetProcAddress(factoryOwner, "SteamInternal_FindOrCreateUserInterface") != reinterpret_cast<FARPROC>(factoryTarget)) {
             releaseOwners(); BindError("Resolved Steam imports could not be verified."); return false;
+        }
+        if (!SteamDiagnostics::GuardSteamShutdown(factoryOwner)) {
+            releaseOwners(); BindError("Could not guard Steam SDK shutdown."); return false;
         }
         using GetUser = int32_t(__cdecl*)();
         using GetInterface = void*(__cdecl*)(int32_t, const char*);
@@ -389,9 +397,10 @@ struct SteamChannelProbe::Impl {
         if (const auto id = openProfileRequest.exchange(0); id && !profile.OpenProfile(id))
             log("voice-profile overlay unavailable");
         const bool ready = selected && handshake.Ready();
-        audio.Update(ready);
+        const bool peerMuted = selected && peerPreferences.Get(selected->remoteSteam).is_mute;
+        audio.Update(ready, peerMuted);
         if (ready && messages) {
-            const int state = (!voiceEnabled || microphoneMuted || microphoneTest || !captureActive) ? 1 : 0;
+            const int state = (!voiceEnabled || microphoneMuted || peerMuted || microphoneTest || !captureActive) ? 1 : 0;
             const auto now = GetTickCount64();
             if (state != lastMicState || now >= nextMicState) {
                 if (const auto header = handshake.MicStateHeader()) {
@@ -407,7 +416,7 @@ struct SteamChannelProbe::Impl {
             }
         }
         audio.Capture([&](const short* pcm) {
-            if (!ready || !messages) return;
+            if (!ready || !messages || peerPreferences.Get(selected->remoteSteam).is_mute) return;
             const auto header = handshake.AudioHeader();
             if (!header) return;
             std::array<uint8_t, 724> packet{};
@@ -424,7 +433,8 @@ struct SteamChannelProbe::Impl {
     }
 };
 
-SteamChannelProbe::SteamChannelProbe(Log log) : impl(std::make_unique<Impl>(log)) {}
+SteamChannelProbe::SteamChannelProbe(Log log, uintptr_t userInitializerRva)
+    : impl(std::make_unique<Impl>(log, userInitializerRva)) {}
 SteamChannelProbe::~SteamChannelProbe() = default;
 void SteamChannelProbe::Update(const IdentitySnapshot& snapshot, const IdentitySession& identities) {
     impl->Prepare(snapshot);

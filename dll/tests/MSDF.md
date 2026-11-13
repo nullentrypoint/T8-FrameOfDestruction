@@ -38,3 +38,10 @@ shows `+9 -26 0` with a 3-pixel outline over gray.
 
 In-game verification: use the flying-text examples in the F1 menu, check
 spatial centering and fade, resize/change resolution, and unload with F11.
+
+Startup regression: on a cold launch (or with a debugger pausing the render
+thread inside `BuildAtlas` for more than five seconds), verify that initialization
+finishes and the menu/overlay appear. The loader must keep the installed DX12
+hooks alive while waiting for Present/atlas generation. Repeat with late
+injection and with compute/copy submissions preceding the first direct queue
+submission; these must not prevent queue capture.

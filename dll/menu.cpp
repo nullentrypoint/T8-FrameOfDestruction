@@ -712,6 +712,7 @@ namespace menu {
                 ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * .60f);
                 if (ImGui::SliderInt("Opponent volume", &preference.volume, 0, 100, "%d%%")) VoiceChat::peerPreferences.Set(peer.steamId, preference);
                 if (ImGui::Checkbox("Mute this opponent", &preference.is_mute)) VoiceChat::peerPreferences.Set(peer.steamId, preference);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mutes this opponent and stops sending your voice to them.");
                 const auto saveError = VoiceChat::peerPreferences.Error();
                 if (!saveError.empty()) ImGui::TextWrapped("%s", saveError.c_str());
                 ImGui::TextUnformatted("Opponent signal level");

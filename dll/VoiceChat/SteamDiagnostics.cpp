@@ -6,10 +6,15 @@
 #include "IdentityTransitions.h"
 #include "IdentitySession.h"
 #include "SteamChannelProbe.h"
+#include "MemoryLayout.h"
 #include <TlHelp32.h>
 #include <filesystem>
 #include <array>
 #include <share.h>
+#include <mutex>
+#ifdef T8_PEER_TRACE_TEST
+#include <cassert>
+#endif
 
 namespace SteamDiagnostics {
 namespace {
@@ -19,6 +24,36 @@ namespace {
     bool traceRequested = false;
     bool profileRequested = false;
     bool channelProbeRequested = false;
+    VoiceChat::MemoryLayout memoryLayout;
+    std::string memoryLayoutError;
+    std::mutex stopMutex;
+    std::atomic<bool> steamShuttingDown{false};
+    using SteamShutdown = void(__cdecl*)();
+    SteamShutdown originalShutdown = nullptr;
+    void* shutdownTarget = nullptr;
+    HMODULE shutdownModule = nullptr;
+    void StopWorker(bool steamShutdown = false);
+
+    void __cdecl SteamShutdownHook() {
+        steamShuttingDown.store(true);
+        // Still before Steam shutdown: CloseChannelWithUser and other worker
+        // cleanup may use the SDK while this thread waits for the worker to exit.
+        StopWorker(true);
+        originalShutdown();
+    }
+
+    bool InstallShutdownHook(void* target) {
+        if (shutdownTarget) return shutdownTarget == target && !steamShuttingDown.load();
+        if (MH_CreateHook(target, reinterpret_cast<void*>(&SteamShutdownHook),
+            reinterpret_cast<void**>(&originalShutdown)) != MH_OK) return false;
+        if (MH_EnableHook(target) != MH_OK) {
+            MH_RemoveHook(target);
+            originalShutdown = nullptr;
+            return false;
+        }
+        shutdownTarget = target;
+        return true;
+    }
 
     bool Read(uintptr_t address, void* output, size_t size) {
         SIZE_T read = 0;
@@ -125,15 +160,16 @@ namespace {
         Log("steam-channel-probe requested=%d; audio=PCM16/16000/mono", channelProbeRequested);
         Modules();
         const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        if (!memoryLayoutError.empty()) Log("steam-probe binding=%s", memoryLayoutError.c_str());
         if (profileRequested) {
-            const bool installed = ProfileTrace::Install(base);
+            const bool installed = ProfileTrace::Install(base, memoryLayout);
             Log("profile-trace install=%s pinned=%d; pinned tracing requires game exit to unload",
                 installed ? "success" : "failed", ProfileTrace::IsPinned());
         }
         Context contexts[] = {
-            {"SteamNetworking006", 0x9773398, 0x693CB10},
-            {"SteamMatchMaking009", 0x9773380, 0x693CAE0},
-            {"SteamUser021", 0x973AD40, 0x5C45550},
+            {"SteamNetworking006", memoryLayout.networkingContext, memoryLayout.networkingInitializer},
+            {"SteamMatchMaking009", memoryLayout.matchmakingContext, memoryLayout.matchmakingInitializer},
+            {"SteamUser021", memoryLayout.userContext, memoryLayout.userInitializer},
         };
         for (auto& context : contexts) {
             context.valid = Validate(base, context);
@@ -141,12 +177,12 @@ namespace {
                 static_cast<unsigned long long>(context.contextRva), context.valid ? "matched" : "skipped");
         }
         bool traceAttempted = false;
-        VoiceChat::PlayerIdentityReader identities(base);
+        VoiceChat::PlayerIdentityReader identities(base, memoryLayout.identity);
         VoiceChat::IdentitySnapshot previousIdentities;
         bool haveIdentities = false;
         VoiceChat::IdentityTransitions identityTransitions;
         VoiceChat::IdentitySession identitySession;
-        VoiceChat::SteamChannelProbe channelProbe(Log);
+        VoiceChat::SteamChannelProbe channelProbe(Log, memoryLayout.userInitializer);
         VoiceChat::IdentitySnapshot identitySnapshot;
         ULONGLONG nextIdentityRead = 0;
         do {
@@ -194,9 +230,9 @@ namespace {
                     context.valid = false;
                     continue;
                 }
-                if (traceRequested && !traceAttempted && context.contextRva == 0x9773398 && values[2]) {
+                if (traceRequested && !traceAttempted && context.contextRva == memoryLayout.networkingContext && values[2]) {
                     traceAttempted = true;
-                    const bool installed = PeerTrace::Install(base, values[2]);
+                    const bool installed = PeerTrace::Install(base, values[2], memoryLayout);
                     Log("peer-trace install=%s pinned=%d; pinned tracing requires game exit to unload",
                         installed ? "success" : "failed", PeerTrace::IsPinned());
                 }
@@ -233,6 +269,8 @@ void Start() {
     channelProbeRequested = GetFileAttributesW((directory / L"steam_channel_probe.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
     logFile = _wfsopen((directory / L"steam_diagnostics.log").c_str(), L"a", _SH_DENYNO);
     if (!logFile) return;
+    VoiceChat::LoadMemoryLayout(directory / L"T8FrameOfDestruction" / L"config" / L"memory_address.ini",
+        memoryLayout, memoryLayoutError);
     stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (stopEvent) worker = CreateThread(nullptr, 0, Run, nullptr, 0, nullptr);
     if (!worker) {
@@ -245,8 +283,40 @@ void Start() {
 }
 
 void Stop() {
-    // Called on the explicit unload worker, never under the loader lock.
+    StopWorker();
+    // During SDK shutdown the detour/trampoline may still be on the game's
+    // stack. Keep them alive until process exit; Uninject checks this flag.
+    if (!shutdownTarget || steamShuttingDown.load()) return;
+    if (MH_DisableHook(shutdownTarget) != MH_OK) return;
+    if (steamShuttingDown.load()) return;
+    MH_RemoveHook(shutdownTarget);
+    shutdownTarget = nullptr;
+    originalShutdown = nullptr;
+    if (shutdownModule) FreeLibrary(shutdownModule);
+    shutdownModule = nullptr;
+}
+
+bool GuardSteamShutdown(HMODULE sdk) {
+    if (steamShuttingDown.load()) return false;
+    auto target = reinterpret_cast<void*>(GetProcAddress(sdk, "SteamAPI_Shutdown"));
+    if (!target) return false;
+    if (shutdownTarget) return shutdownTarget == target;
+    HMODULE owner = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+        reinterpret_cast<LPCWSTR>(target), &owner)) return false;
+    if (!InstallShutdownHook(target)) { FreeLibrary(owner); return false; }
+    shutdownModule = owner;
+    return true;
+}
+
+bool IsSteamShuttingDown() { return steamShuttingDown.load(); }
+
+namespace {
+void StopWorker(bool steamShutdown) {
+    // Called outside DllMain, both for explicit unload and before SDK shutdown.
+    std::lock_guard lock(stopMutex);
     if (!worker) return;
+    if (steamShutdown) Log("steam-probe stopping worker before SteamAPI_Shutdown");
     SetEvent(stopEvent);
     WaitForSingleObject(worker, INFINITE);
     CloseHandle(worker);
@@ -255,4 +325,55 @@ void Stop() {
     fclose(logFile);
     logFile = nullptr;
 }
+}
+
+#ifdef T8_PEER_TRACE_TEST
+namespace {
+    std::atomic<bool> testWorkerFinished{false};
+    unsigned testShutdownCalls = 0;
+    DWORD WINAPI TestSteamWorker(void*) {
+        assert(WaitForSingleObject(stopEvent, INFINITE) == WAIT_OBJECT_0);
+        // Represents the last worker cleanup that still needs a live SDK.
+        testWorkerFinished.store(true);
+        return 0;
+    }
+    __declspec(noinline) void __cdecl TestSteamShutdown() {
+        assert(testWorkerFinished.load());
+        assert(!worker && !stopEvent && !logFile);
+        ++testShutdownCalls;
+    }
+}
+
+void TestShutdownOrdering() {
+    assert(MH_Initialize() == MH_OK);
+    SteamShutdown volatile invoke = &TestSteamShutdown;
+    for (bool explicitUnload : {false, true}) {
+        testWorkerFinished.store(false);
+        testShutdownCalls = 0;
+        assert(tmpfile_s(&logFile) == 0 && logFile);
+        stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        assert(stopEvent);
+        worker = CreateThread(nullptr, 0, TestSteamWorker, nullptr, 0, nullptr);
+        assert(worker);
+        assert(InstallShutdownHook(reinterpret_cast<void*>(&TestSteamShutdown)));
+        if (explicitUnload) {
+            Stop();
+            assert(!shutdownTarget && !IsSteamShuttingDown());
+        }
+        invoke();
+        invoke(); // Repeated SDK shutdown must not use the closed worker/log.
+        assert(testShutdownCalls == 2);
+        assert(IsSteamShuttingDown() == !explicitUnload);
+        if (shutdownTarget) {
+            // Test has returned from the detour, unlike a concurrent F11 unload.
+            assert(MH_DisableHook(shutdownTarget) == MH_OK);
+            assert(MH_RemoveHook(shutdownTarget) == MH_OK);
+            shutdownTarget = nullptr;
+            originalShutdown = nullptr;
+        }
+        steamShuttingDown.store(false);
+    }
+    assert(MH_Uninitialize() == MH_OK);
+}
+#endif
 }

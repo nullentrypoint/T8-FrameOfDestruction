@@ -1,5 +1,6 @@
 #include "../stdafx.h"
 #include "SteamProfileTrace.h"
+#include "MemoryLayout.h"
 #include <array>
 #include <atomic>
 #ifdef T8_PEER_TRACE_TEST
@@ -49,17 +50,24 @@ namespace {
     }
 }
 
-bool Install(uintptr_t base) {
+bool Install(uintptr_t base, const VoiceChat::MemoryLayout& layout) {
     if (installed) return true;
+    if (!layout.profileEntry || !layout.profileOverlayCall || !layout.profileDialog) return false;
     const unsigned char prologue[] = {
         0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x4C,0x24,0x08,0x55,0x56,0x57,
         0x48,0x83,0xEC,0x40,0x49,0x8B,0xD8,0x48,0x8B,0xEA,0x48,0x8B,0xF9};
-    const unsigned char overlayCall[] = {
-        0x4C,0x8B,0xC5,0x48,0x8D,0x15,0x0E,0x61,0x3A,0x02,0xFF,0x90,0xE8,0,0,0};
+    const unsigned char overlayPrefix[] = {0x4C,0x8B,0xC5,0x48,0x8D,0x15};
+    const unsigned char overlaySuffix[] = {0xFF,0x90,0xE8,0,0,0};
     const unsigned char dialog[] = {'s','t','e','a','m','i','d',0};
-    if (!Match(base + 0x6A23AB0, prologue) || !Match(base + 0x6A23B70, overlayCall) ||
-        !Match(base + 0x8DC9C88, dialog)) return false;
-    auto target = reinterpret_cast<void*>(base + 0x6A23AB0);
+    const auto call = base + layout.profileOverlayCall;
+    int32_t displacement = 0;
+    SIZE_T copied = 0;
+    if (!Match(base + layout.profileEntry, prologue) || !Match(call, overlayPrefix) ||
+        !Match(call + 10, overlaySuffix) || !Match(base + layout.profileDialog, dialog) ||
+        !ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(call + 6), &displacement,
+            sizeof(displacement), &copied) || copied != sizeof(displacement) ||
+        call + 10 + displacement != base + layout.profileDialog) return false;
+    auto target = reinterpret_cast<void*>(base + layout.profileEntry);
     if (MH_CreateHook(target, reinterpret_cast<void*>(&Hook), reinterpret_cast<void**>(&original)) != MH_OK)
         return false;
     HMODULE self = nullptr;

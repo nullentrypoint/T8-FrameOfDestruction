@@ -30,8 +30,8 @@ const char* IdentityStatusName(IdentityReadStatus status) {
     return "unknown";
 }
 
-PlayerIdentityReader::PlayerIdentityReader(uintptr_t moduleBase)
-    : PlayerIdentityReader(moduleBase, LocalRead, nullptr) {}
+PlayerIdentityReader::PlayerIdentityReader(uintptr_t moduleBase, IdentityLayout layout)
+    : PlayerIdentityReader(moduleBase, LocalRead, nullptr, layout) {}
 
 PlayerIdentityReader::PlayerIdentityReader(uintptr_t moduleBase, IdentityMemoryRead read, void* ctx, IdentityLayout offsets)
     : base(moduleBase), readMemory(read), context(ctx), layout(offsets) {}
@@ -67,7 +67,8 @@ IdentityReadStatus PlayerIdentityReader::ReadString(uintptr_t address, std::stri
 IdentitySnapshot PlayerIdentityReader::Read() const {
     auto fail = [](IdentityReadStatus status) { return IdentitySnapshot{status, 0, {}}; };
     const auto max = (std::numeric_limits<uintptr_t>::max)();
-    if (!base || layout.rootRva > max - base || layout.vtableRva > max - base || layout.destructorRva > max - base)
+    if (!base || !layout.rootRva || !layout.vtableRva || !layout.destructorRva ||
+        layout.rootRva > max - base || layout.vtableRva > max - base || layout.destructorRva > max - base)
         return fail(IdentityReadStatus::UnsupportedBuild);
     uint16_t magic = 0;
     uintptr_t destructor = 0;

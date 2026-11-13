@@ -150,6 +150,10 @@ void Shutdown() {
 
 bool Initialize(ID3D12Device* newDevice, DXGI_FORMAT format, const std::string& fontPath) {
     Shutdown();
+    if (!newDevice) {
+        console::AddLogError("MSDF: missing DX12 device");
+        return false;
+    }
     device = newDevice;
     // Build into local/cache CPU memory; GPU state is committed only on success.
     auto initialize = [&]() -> bool {
