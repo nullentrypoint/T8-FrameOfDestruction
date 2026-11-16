@@ -99,6 +99,8 @@ struct FrameAdvantageHints {
     bool lockToWorld = true;
     float fontSize = 60.0f;
     bool fontShadow = true;
+    float outlineThickness = 1.5f;
+    float outlineColor[3] = { 0.0f, 0.0f, 0.0f };
     float flySpeed = 1.0f;
     float fadeSpeed = 0.015f;
     float color0[3] = { 1.0f, 1.0f, 1.0f };                           // Neon #FFFFFF

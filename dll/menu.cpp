@@ -204,6 +204,10 @@ namespace menu {
         setKey("FrameAdvantageHints", "lockToWorld", frameAdvantageHints.lockToWorld ? "true" : "false");
         setKey("FrameAdvantageHints", "fontSize", std::to_string(frameAdvantageHints.fontSize));
         setKey("FrameAdvantageHints", "fontShadow", frameAdvantageHints.fontShadow ? "true" : "false");
+        setKey("FrameAdvantageHints", "outlineThickness", std::to_string(frameAdvantageHints.outlineThickness));
+        setKey("FrameAdvantageHints", "outlineColor_r", std::to_string(frameAdvantageHints.outlineColor[0]));
+        setKey("FrameAdvantageHints", "outlineColor_g", std::to_string(frameAdvantageHints.outlineColor[1]));
+        setKey("FrameAdvantageHints", "outlineColor_b", std::to_string(frameAdvantageHints.outlineColor[2]));
         setKey("FrameAdvantageHints", "flySpeed", std::to_string(frameAdvantageHints.flySpeed));
         setKey("FrameAdvantageHints", "fadeSpeed", std::to_string(frameAdvantageHints.fadeSpeed));
         setKey("FrameAdvantageHints", "debugInfo", frameAdvantageHints.debugInfo ? "true" : "false");
@@ -302,6 +306,10 @@ namespace menu {
             defaultFrameAdvantageHints.lockToWorld ? "true" : "false") == "true";
         frameAdvantageHints.fontSize = std::stof(getValue("FrameAdvantageHints", "fontSize", std::to_string(DefaultFontSize())));
         frameAdvantageHints.fontShadow = getValue("FrameAdvantageHints", "fontShadow", defaultFrameAdvantageHints.fontShadow ? "true" : "false") == "true";
+        frameAdvantageHints.outlineThickness = throwSetting("outlineThickness", defaultFrameAdvantageHints.outlineThickness, 0, 12);
+        frameAdvantageHints.outlineColor[0] = throwSetting("outlineColor_r", defaultFrameAdvantageHints.outlineColor[0], 0, 1);
+        frameAdvantageHints.outlineColor[1] = throwSetting("outlineColor_g", defaultFrameAdvantageHints.outlineColor[1], 0, 1);
+        frameAdvantageHints.outlineColor[2] = throwSetting("outlineColor_b", defaultFrameAdvantageHints.outlineColor[2], 0, 1);
         frameAdvantageHints.flySpeed = std::stof(getValue("FrameAdvantageHints", "flySpeed", std::to_string(defaultFrameAdvantageHints.flySpeed)));
         frameAdvantageHints.fadeSpeed = std::stof(getValue("FrameAdvantageHints", "fadeSpeed", std::to_string(defaultFrameAdvantageHints.fadeSpeed)));
 
@@ -1043,9 +1051,17 @@ namespace menu {
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
             bool tempFontShadow = frameAdvantageHints.fontShadow;
-            if (ImGui::Checkbox("Font Shadow", &tempFontShadow)) {
+            if (ImGui::Checkbox("Text Outline", &tempFontShadow)) {
                 SetFrameAdvantageFontShadow(tempFontShadow);
             }
+            ImGui::BeginDisabled(!frameAdvantageHints.fontShadow);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+            if (ImGui::SliderFloat("Outline Thickness", &frameAdvantageHints.outlineThickness, 0.0f, 12.0f, "%.1f px"))
+                SaveAllSettings();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+            if (ImGui::ColorEdit3("Outline Color", frameAdvantageHints.outlineColor))
+                SaveAllSettings();
+            ImGui::EndDisabled();
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
             float tempFlySpeed = frameAdvantageHints.flySpeed;

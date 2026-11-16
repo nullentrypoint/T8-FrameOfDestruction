@@ -283,6 +283,10 @@ namespace overlay {
             ImColor(0, 0, 0, 255) // ���� �������
             });
         flyingTexts.back().worldLocked = locked;
+        flyingTexts.back().outlineThickness = menu::frameAdvantageHints.fontShadow
+            ? menu::frameAdvantageHints.outlineThickness : 0.0f;
+        const auto& outlineRgb = menu::frameAdvantageHints.outlineColor;
+        flyingTexts.back().outlineColor = ImColor(outlineRgb[0], outlineRgb[1], outlineRgb[2], 1.0f);
         if (locked && worldOrigin && worldOrigin->valid()) flyingTexts.back().worldOrigin = worldOrigin;
         for (int i = 0; i < 5; ++i) {
             if (hitType == HitRingSettings::types[i] || (i == 2 && hitType == "MID_UNBLOCKABLE")) {
