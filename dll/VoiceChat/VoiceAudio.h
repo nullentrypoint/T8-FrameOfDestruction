@@ -164,6 +164,9 @@ public:
             receiveVolume = volume; receiveMuted = muted;
         }
     }
+    void FlushPlayback() {
+        if (output && !microphoneTest) waveOutReset(output);
+    }
     template<class Send> void Capture(Send send) {
         const bool test = microphoneTest.load();
         if (!input || (!test && (microphoneMuted || !voiceEnabled))) return;
@@ -198,6 +201,18 @@ public:
             waveOutWrite(output, &b.header, sizeof(WAVEHDR));
             return; // Drop excess packets instead of accumulating latency.
         }
+    }
+    void PlayMixed(const uint8_t* pcm) {
+        if (!output || microphoneTest || !voiceEnabled) return;
+        // Keep two blocks of scheduling headroom. A single 20 ms buffer underruns
+        // with Windows' ~15.6 ms polling granularity even on a lossless network.
+        const bool queued = std::any_of(playback.begin(), playback.end(),
+            [](const auto& b) { return (b.header.dwFlags & WHDR_INQUEUE) != 0; });
+        if (!queued) {
+            std::array<uint8_t, 640> silence{};
+            Play(silence.data()); Play(silence.data());
+        }
+        Play(pcm);
     }
 };
 }

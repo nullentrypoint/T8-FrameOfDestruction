@@ -12,6 +12,10 @@ This software is intended for educational purposes only.
 - Hit-type rings and optional world-locked indicators that follow the camera.
 - Throw-break timelines showing break windows, input timing and results, including tackles and ground throws. Break buttons are revealed after the result.
 - Automatic learning and persistence of actionable frames between sessions.
+- Steam voice chat in matches, Fight Lounge and Player Match custom rooms, with support for multiple simultaneous speakers. Participants need compatible versions of the mod.
+- Voice participant list with Steam avatars, game and Steam names, connection ping, speaking levels, individual mute and volume controls. Click an avatar to open the Steam profile in the overlay.
+- Voice avatars with speaking and microphone-state indicators: above connected players in Fight Lounge, in a horizontal row in custom rooms, and at fighter HUD positions during your match. Spectators remain in the participant menu.
+- Microphone selection, gain adjustment, local microphone testing and a configurable mute hotkey with dedicated on/off notifications.
 - In-game customization with `F1`: colors, font size, animation, indicator placement and throw-card style.
 
 ## Getting Started

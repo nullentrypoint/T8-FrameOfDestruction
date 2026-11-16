@@ -2,6 +2,7 @@
 #include "VoiceChat/VoiceAudio.h"
 #include "VoiceChat/VoicePresentation.h"
 #include "VoiceChat/PeerPreferences.h"
+#include "VoiceChat/VoiceParticipantRows.h"
 #include <shellapi.h>
 #pragma comment(lib, "shell32.lib")
 #include <fstream>
@@ -21,7 +22,16 @@ namespace menu {
     bool isOpen = false;
     float test = 0.0f;
     static int currentSection = 1; // Settings first; console is a diagnostic tool.
+#ifdef T8_MENU_LAYOUT_TEST
+    void ShowVoiceSectionForTest() { currentSection = 2; }
+#endif
     static bool bindingMicrophoneKey = false;
+    static ImVec2 voiceHudReference(16.50f, 162.50f);
+    static ImVec2 FighterVoicePosition(const ImGuiIO& io, int slot, float size) {
+        const float scale = std::min(io.DisplaySize.x / 1920.0f, io.DisplaySize.y / 1080.0f);
+        const float left = (io.DisplaySize.x - 1920 * scale) * .5f + voiceHudReference.x * scale;
+        return {slot == 0 ? left : io.DisplaySize.x - left - size, voiceHudReference.y * scale};
+    }
 
     struct Notification {
         std::string title;
@@ -31,6 +41,7 @@ namespace menu {
         double duration;
         std::shared_ptr<const VoiceChat::Avatar> avatar;
         bool voice = false;
+        int microphone = -1; // -1 normal notice, 0 enabled, 1 muted.
     };
     static std::vector<Notification> notifications;
     static std::mutex notificationMutex;
@@ -48,7 +59,7 @@ namespace menu {
     }
 
     static void Notify(const char* title, const char* detail, double duration = 4.5,
-        std::shared_ptr<const VoiceChat::Avatar> avatar = {}, bool voice = false) {
+        std::shared_ptr<const VoiceChat::Avatar> avatar = {}, bool voice = false, int microphone = -1) {
         if (!ImGui::GetCurrentContext()) return;
         for (auto& item : notifications) {
             if (item.title == title && item.detail == detail) {
@@ -60,7 +71,7 @@ namespace menu {
         }
         if (notifications.size() == 3) notifications.erase(notifications.begin());
         const double now = NotificationTime();
-        notifications.push_back({ title, detail, now, now, duration, std::move(avatar), voice });
+        notifications.push_back({ title, detail, now, now, duration, std::move(avatar), voice, microphone });
     }
 
     // Steam small avatars are 32x32. Row runs render the exact RGBA bitmap
@@ -116,7 +127,7 @@ namespace menu {
             const float age = static_cast<float>(now - item.refreshed);
             const float alpha = std::min(std::clamp(static_cast<float>(now - item.started) / 0.18f, 0.0f, 1.0f), std::clamp((static_cast<float>(item.duration) - age) / 0.5f, 0.0f, 1.0f));
             const float x = io.DisplaySize.x - width - 24.0f * scale + (1.0f - alpha) * 20.0f * scale;
-            const float inset = (item.voice ? 78.0f : 20.0f) * scale;
+            const float inset = (item.voice || item.microphone >= 0 ? 78.0f : 20.0f) * scale;
             const float wrapWidth = std::max(1.0f, width - inset - 20 * scale);
             const float detailHeight = font->CalcTextSizeA(14 * scale, (std::numeric_limits<float>::max)(), wrapWidth, item.detail.c_str()).y;
             const float height = std::max(86 * scale, 46 * scale + detailHeight + 18 * scale);
@@ -126,6 +137,16 @@ namespace menu {
             draw->AddRectFilled(ImVec2(x, y), ImVec2(x + 4 * scale, y + height), color(240, 24, 85));
             draw->PushClipRect(ImVec2(x + 10 * scale, y), ImVec2(x + width - 10 * scale, y + height), true);
             if (item.voice) DrawAvatar(draw, ImVec2(x + 16 * scale, y + 20 * scale), 48 * scale, item.avatar, alpha);
+            if (item.microphone >= 0) {
+                const auto ink = item.microphone ? color(255, 75, 85) : color(70, 235, 130);
+                const auto p = [&](float dx, float dy) { return ImVec2(x + dx * scale, y + dy * scale); };
+                draw->AddRectFilled(p(33, 24), p(45, 47), ink, 6 * scale);
+                draw->PathArcTo(p(39, 45), 12 * scale, 0, 3.14159265f);
+                draw->PathStroke(ink, 0, 2 * scale);
+                draw->AddLine(p(39, 57), p(39, 65), ink, 2 * scale);
+                draw->AddLine(p(31, 65), p(47, 65), ink, 2 * scale);
+                if (item.microphone) draw->AddLine(p(23, 67), p(55, 23), ink, 3 * scale);
+            }
             draw->AddText(font, 17 * scale, ImVec2(std::round(x + inset), std::round(y + 18 * scale)), color(255, 245, 249), item.title.c_str());
             draw->AddText(font, 14 * scale, ImVec2(std::round(x + inset), std::round(y + 46 * scale)), color(173, 176, 190), item.detail.c_str(), nullptr, wrapWidth);
             draw->PopClipRect();
@@ -160,13 +181,15 @@ namespace menu {
     }
 
     // Сохранение всех настроек в INI файл
-    void SaveAllSettings() {
+    static bool SaveSettings(bool notify) {
         if (kv::userSettings->HasKey("microphone_test", "VoiceChat"))
             kv::userSettings->RemoveKey("microphone_test", "VoiceChat");
         setKey("VoiceChat", "microphone_hotkey", std::to_string(VoiceChat::microphoneHotkey.load()));
         setKey("VoiceChat", "enabled", VoiceChat::voiceEnabled ? "true" : "false");
         setKey("VoiceChat", "microphone_muted", VoiceChat::microphoneMuted ? "true" : "false");
+        setKey("VoiceChat", "debug_log", VoiceChat::voiceDebugLog ? "true" : "false");
         setKey("VoiceChat", "microphone_gain", std::to_string(VoiceChat::microphoneGain.load()));
+        setKey("VoiceChat", "lounge_avatar_distance", std::to_string(VoiceChat::loungeAvatarDistance.load()));
         {
             std::lock_guard lock(VoiceChat::voiceMutex);
             setKey("VoiceChat", "microphone_name", VoiceChat::preferredMicrophone);
@@ -226,18 +249,30 @@ namespace menu {
         if (!kv::userSettings->Save()) {
             Notify("SAVE FAILED", "Could not write the settings file.");
             DebugLog("[menu] Failed to save settings\n");
-            return;
+            return false;
         }
-        Notify("SETTINGS SAVED", "Your preferences have been updated.");
+        if (notify) Notify("SETTINGS SAVED", "Your preferences have been updated.");
 
         DebugLog("[menu] Settings saved\n");
+        return true;
+    }
+    void SaveAllSettings() { SaveSettings(true); }
+    static void SetMicrophoneMuted(bool muted) {
+        VoiceChat::microphoneMuted = muted;
+        SaveSettings(false);
+        std::erase_if(notifications, [](const auto& item) { return item.microphone >= 0; });
+        Notify("MICROPHONE", muted ? "Microphone muted" : "Microphone enabled", 3, {}, false, muted ? 1 : 0);
     }
 
     // Загрузка настроек
     void LoadSettings() {
         VoiceChat::voiceEnabled = getValue("VoiceChat", "enabled", "true") == "true";
         VoiceChat::microphoneMuted = getValue("VoiceChat", "microphone_muted", "false") == "true";
+        VoiceChat::voiceDebugLog = getValue("VoiceChat", "debug_log", "false") == "true";
         VoiceChat::microphoneTest = false;
+        int avatarDistance = static_cast<int>(VoiceChat::LoungeAvatarMaxDistance);
+        VoiceChat::ParseLoungeAvatarDistance(getValue("VoiceChat", "lounge_avatar_distance", "2000"), avatarDistance);
+        VoiceChat::loungeAvatarDistance = avatarDistance;
         try {
             VoiceChat::microphoneGain = std::clamp(std::stoi(getValue("VoiceChat", "microphone_gain", "100")), 0, 400);
         } catch (...) { VoiceChat::microphoneGain = 100; }
@@ -405,8 +440,7 @@ namespace menu {
                 bindingMicrophoneKey = false;
                 SaveAllSettings();
             } else if (!io.WantTextInput && key == VoiceChat::microphoneHotkey.load()) {
-                VoiceChat::microphoneMuted = !VoiceChat::microphoneMuted.load();
-                SaveAllSettings();
+                SetMicrophoneMuted(!VoiceChat::microphoneMuted.load());
             }
         }
         if (!isOpen || !focused) bindingMicrophoneKey = false;
@@ -427,15 +461,216 @@ namespace menu {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", copy ? "Copy profile link" : "Open Steam profile in overlay");
         return clicked;
     }
+    static void DrawVoiceTile(ImDrawList* draw, ImVec2 at, float size, ImFont* font,
+        const VoiceChat::PeerView& peer, bool known, bool muted, bool blocked, bool speaking) {
+        const float scale = size / 42.0f;
+        if (speaking) for (int glow = 4; glow >= 1; --glow)
+            draw->AddRect(ImVec2(at.x - glow * scale, at.y - glow * scale),
+                ImVec2(at.x + size + glow * scale, at.y + size + glow * scale),
+                IM_COL32(70, 255, 130, 150 / glow), 3 * scale, 0, 2 * scale);
+        DrawAvatar(draw, at, size, peer.avatar);
+        if (known && !muted && !blocked) return;
+        const ImVec2 badge(at.x + size - 7 * scale, at.y + size - 6 * scale);
+        draw->AddCircleFilled(badge, 10 * scale, IM_COL32(22, 23, 30, 240));
+        const ImU32 color = (muted || blocked) ? IM_COL32(255, 75, 85, 255) : IM_COL32(190, 195, 205, 255);
+        if (!known && !blocked) draw->AddText(font, 14 * scale, ImVec2(badge.x - 4 * scale, badge.y - 8 * scale), color, "?");
+        else if (blocked) {
+            draw->AddRectFilled(ImVec2(badge.x - 6 * scale, badge.y - 2 * scale), ImVec2(badge.x - 3 * scale, badge.y + 2 * scale), color);
+            draw->AddTriangleFilled(ImVec2(badge.x - 4 * scale, badge.y), ImVec2(badge.x + 1 * scale, badge.y - 5 * scale), ImVec2(badge.x + 1 * scale, badge.y + 5 * scale), color);
+            draw->AddLine(ImVec2(badge.x - 6 * scale, badge.y + 6 * scale), ImVec2(badge.x + 6 * scale, badge.y - 6 * scale), color, 2 * scale);
+        } else {
+            draw->AddRectFilled(ImVec2(badge.x - 2 * scale, badge.y - 6 * scale), ImVec2(badge.x + 2 * scale, badge.y + 1 * scale), color, 2 * scale);
+            draw->AddLine(ImVec2(badge.x, badge.y), ImVec2(badge.x, badge.y + 5 * scale), color, scale);
+            draw->AddLine(ImVec2(badge.x - 3 * scale, badge.y + 5 * scale), ImVec2(badge.x + 3 * scale, badge.y + 5 * scale), color, scale);
+            draw->AddLine(ImVec2(badge.x - 6 * scale, badge.y + 6 * scale), ImVec2(badge.x + 6 * scale, badge.y - 6 * scale), color, 2 * scale);
+        }
+    }
+
+    static void DrawLoungeVoiceHUD(const ImGuiIO& io, ImFont* font) {
+        VoiceChat::LoungeView view;
+        { std::lock_guard lock(VoiceChat::presentationMutex); view = VoiceChat::loungeView; }
+        const auto now = GetTickCount64();
+        if (!VoiceChat::FreshLounge(view, now) || !VoiceChat::voiceEnabled || io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
+        if (view.customRoom) {
+            if (!VoiceChat::voiceEnabled) return;
+            if (!font) font = ImGui::GetFont();
+            VoiceChat::MatchVoicePair fighters;
+            { std::lock_guard lock(VoiceChat::presentationMutex); fighters = VoiceChat::matchVoicePair; }
+            const auto rows = VoiceChat::CustomRoomHudRows(view, now, fighters);
+            const bool fighting = VoiceChat::FreshMatchVoicePair(fighters, now);
+            const int localSlot = VoiceChat::localPlayerSlot.load();
+            auto* draw = ImGui::GetBackgroundDrawList();
+            for (size_t i = 0; i < rows.size(); ++i) {
+                const auto& member = rows[i];
+                auto tile = VoiceChat::CustomRoomHudTile(io.DisplaySize.x, io.DisplaySize.y, rows.size(), i);
+                if (fighting) {
+                    if (localSlot < 0) continue;
+                    tile.size = 42 * std::clamp(io.DisplaySize.y / 1080.0f, .75f, 1.5f);
+                    const auto at = FighterVoicePosition(io, member.peer.steamId == fighters.local ? localSlot : 1 - localSlot, tile.size);
+                    tile.x = at.x; tile.y = at.y;
+                }
+                if (tile.size <= 0) continue;
+                const auto preference = VoiceChat::peerPreferences.Get(member.peer.steamId);
+                const bool known = member.self || (member.peer.micState >= 0 && now - member.peer.micStateAt < 2500);
+                const bool muted = member.self ? (VoiceChat::microphoneMuted || VoiceChat::microphoneTest) : known && member.peer.micState == 1;
+                const bool blocked = !member.self && (preference.is_mute || preference.volume == 0);
+                const auto spoke = member.self ? VoiceChat::localSpokeAt.load() : member.peer.spokeAt;
+                DrawVoiceTile(draw, ImVec2(tile.x, tile.y), tile.size, font, member.peer, known, muted, blocked,
+                    !muted && !blocked && spoke && now >= spoke && now - spoke < 180);
+            }
+            return;
+        }
+        const auto read = [](void*, uintptr_t address, void* output, size_t size) -> bool {
+            SIZE_T copied = 0;
+            return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), output, size, &copied) && copied == size;
+        };
+        const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(L"Polaris-Win64-Shipping.exe"));
+        const auto camera = VoiceChat::ReadLoungeCamera(base, view.world, view.camera, read, nullptr);
+        if (!camera) return;
+        if (!font) font = ImGui::GetFont();
+        const float scale = std::clamp(io.DisplaySize.y / 1080.0f, .75f, 1.5f);
+        const float size = 36 * scale;
+        auto* draw = ImGui::GetBackgroundDrawList(); // World markers are below all menu/console windows.
+        struct Marker { const VoiceChat::LoungeMemberView* member; ImVec2 at; double cameraDistance; };
+        std::vector<Marker> markers;
+        for (const auto& member : view.members) {
+            // Steam profiles only; console avatars have no compatible voice endpoint.
+            if (!member.peer.steamId || !member.peer.connected) continue;
+            uintptr_t root = 0;
+            uint64_t cosmos = 0;
+            if (!member.self && (!read(nullptr, member.actor + 0x390, &cosmos, sizeof(cosmos)) || cosmos != member.cosmosId)) continue;
+            if (!read(nullptr, member.actor + 0x1A0, &root, sizeof(root)) || root < 0x10000 || root > 0x00007FFFFFFEFFFFULL) continue;
+            VoiceChat::LoungePosition point;
+            if (!read(nullptr, root + 0x260, &point, sizeof(point))) continue;
+            // Root origin is near the capsule centre. Keep the icon above the avatar.
+            point.z += 110.0;
+            const auto screen = camera->Project(point);
+            if (!screen || !VoiceChat::LoungeMarkerInRange(*screen)) continue;
+            const ImVec2 at((screen->x + 1) * .5f * io.DisplaySize.x - size * .5f,
+                (1 - screen->y) * .5f * io.DisplaySize.y - size);
+            if (at.x < 0 || at.y < 0 || at.x + size > io.DisplaySize.x || at.y + size > io.DisplaySize.y) continue;
+            markers.push_back({&member, at, screen->cameraDistance});
+        }
+        // Painter's order: nearby avatars cover far-away avatars, independent of roster order.
+        std::stable_sort(markers.begin(), markers.end(), [](const auto& a, const auto& b) {
+            return a.cameraDistance > b.cameraDistance;
+        });
+        for (const auto& marker : markers) {
+            const auto& member = *marker.member;
+            const auto at = marker.at;
+            const auto preference = VoiceChat::peerPreferences.Get(member.peer.steamId);
+            const bool known = member.self || (member.peer.connected && member.peer.micState >= 0 && now - member.peer.micStateAt < 2500);
+            const bool muted = member.self ? (!VoiceChat::voiceEnabled || VoiceChat::microphoneMuted || VoiceChat::microphoneTest) : known && member.peer.micState == 1;
+            const bool blocked = !member.self && (preference.is_mute || preference.volume == 0 || !VoiceChat::voiceEnabled);
+            const auto spoke = member.self ? VoiceChat::localSpokeAt.load() : member.peer.spokeAt;
+            DrawVoiceTile(draw, at, size, font, member.peer, known, muted, blocked,
+                !muted && !blocked && (member.self || member.peer.connected) && spoke && now - spoke < 180);
+        }
+    }
+
+    static void DrawVoiceParticipants(float scale) {
+        VoiceChat::LoungeView lounge;
+        VoiceChat::PeerView peer, local;
+        { std::lock_guard lock(VoiceChat::presentationMutex); lounge = VoiceChat::loungeView; peer = VoiceChat::peerView; local = VoiceChat::localView; }
+        // Match audio arrives faster than connection-statistics updates.
+        peer.level = VoiceChat::opponentLevel.load(); peer.levelAt = VoiceChat::remoteLevelAt.load();
+        const auto now = GetTickCount64();
+        const auto rows = VoiceChat::VoiceParticipantRows(lounge, peer, local, now);
+        const bool inLounge = VoiceChat::FreshLounge(lounge, now);
+        ImGui::TextUnformatted(inLounge ? (lounge.customRoom ? "CUSTOM ROOM PARTICIPANTS" : "LOUNGE PARTICIPANTS") : "VOICE PARTICIPANTS");
+        if (rows.empty()) { ImGui::TextDisabled("No participants"); return; }
+        const float height = std::min(300 * scale, (static_cast<float>(rows.size()) * 46 + 38) * scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(5 * scale, 4 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * scale, 3 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4 * scale, 2 * scale));
+        const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerH |
+            ImGuiTableFlags_SizingStretchProp;
+        if (ImGui::BeginTable("VoiceParticipants", 6, flags, ImVec2(0, height))) {
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 38 * scale);
+            ImGui::TableSetupColumn("Game name / Steam", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, 56 * scale);
+            ImGui::TableSetupColumn("Mute", ImGuiTableColumnFlags_WidthFixed, 36 * scale);
+            ImGui::TableSetupColumn("Volume", ImGuiTableColumnFlags_WidthFixed, 92 * scale);
+            ImGui::TableSetupColumn("Level", ImGuiTableColumnFlags_WidthFixed, 64 * scale);
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableHeadersRow();
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(rows.size()), 46 * scale);
+            while (clipper.Step()) for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
+                const auto& member = rows[index];
+                const auto& p = member.peer;
+                const auto key = member.self ? "self" : std::to_string(p.steamId ? p.steamId : member.cosmosId);
+                ImGui::PushID(key.c_str());
+                ImGui::TableNextRow(ImGuiTableRowFlags_None, 46 * scale);
+                ImGui::TableSetColumnIndex(0);
+                DrawAvatar(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), 34 * scale, p.avatar);
+                ImGui::BeginDisabled(!p.steamId);
+                if (ImGui::InvisibleButton("##avatar_profile", ImVec2(34 * scale, 34 * scale))) VoiceChat::openProfileRequest = p.steamId;
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    ImGui::SetTooltip("Open Steam profile\n%s", member.self ? "You" : p.connected ? "Connected to voice chat" : "Not connected to voice chat");
+                }
+                if (p.steamId && ImGui::BeginPopupContextItem("Profile")) {
+                    if (ImGui::MenuItem("Open Steam profile")) VoiceChat::openProfileRequest = p.steamId;
+                    if (ImGui::MenuItem("Copy profile link")) ImGui::SetClipboardText(("https://steamcommunity.com/profiles/" + std::to_string(p.steamId)).c_str());
+                    ImGui::EndPopup();
+                }
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(p.gameName.empty() ? (member.self ? "You" : "Game name unavailable") : p.gameName.c_str());
+                if (ImGui::IsItemHovered() && !p.gameName.empty()) ImGui::SetTooltip("%s", p.gameName.c_str());
+                ImGui::TextDisabled("%s", !p.steamId ? (member.self ? "Steam not ready" : "Console player") :
+                    (p.name.empty() || p.name == "Opponent") ? "Steam profile loading..." : p.name.c_str());
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.connected ? "Connected" : member.self ? "Local player" : "Not connected to voice chat");
+                ImGui::TableSetColumnIndex(2);
+                if (!member.self && p.connected && p.ping >= 0) ImGui::Text("%d ms", p.ping);
+                else ImGui::TextDisabled("--");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", member.self ? "Local player" : "Voice connection round-trip time; unavailable until connected");
+                auto preference = VoiceChat::peerPreferences.Get(p.steamId);
+                ImGui::TableSetColumnIndex(3);
+                bool muted = member.self ? VoiceChat::microphoneMuted.load() : preference.is_mute;
+                ImGui::BeginDisabled(!member.self && !p.steamId);
+                if (ImGui::Checkbox("##mute", &muted)) {
+                    if (member.self) SetMicrophoneMuted(muted);
+                    else { preference.is_mute = muted; VoiceChat::peerPreferences.Set(p.steamId, preference); }
+                }
+                ImGui::EndDisabled();
+                ImGui::TableSetColumnIndex(4);
+                if (member.self) ImGui::TextDisabled("Microphone");
+                else {
+                    ImGui::BeginDisabled(!p.steamId);
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::SliderInt("##volume", &preference.volume, 0, 100, "%d%%")) VoiceChat::peerPreferences.Set(p.steamId, preference);
+                    ImGui::EndDisabled();
+                }
+                ImGui::TableSetColumnIndex(5);
+                const float level = member.self ? (now - VoiceChat::microphoneLevelAt.load() < 250 ? VoiceChat::microphoneLevel.load() : 0) : VoiceChat::FreshVoiceLevel(p, now);
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(.25f, .9f, .5f, 1));
+                ImGui::ProgressBar(std::clamp(level, 0.0f, 1.0f), ImVec2(-1, 10 * scale), "");
+                ImGui::PopStyleColor();
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::PopStyleVar(3);
+        const auto error = VoiceChat::peerPreferences.Error();
+        if (!error.empty()) ImGui::TextWrapped("%s", error.c_str());
+    }
+
     static void DrawVoiceHUD(const ImGuiIO& io, ImFont* font) {
         VoiceChat::PeerView peer, local;
         { std::lock_guard lock(VoiceChat::presentationMutex); peer = VoiceChat::peerView; local = VoiceChat::localView; }
         const auto now = GetTickCount64();
         const auto previewUntil = VoiceChat::avatarPreviewUntil.load();
         const bool preview = now < previewUntil;
+        if (!preview) {
+            std::lock_guard lock(VoiceChat::presentationMutex);
+            if (VoiceChat::FreshLounge(VoiceChat::loungeView, now)) return;
+        }
         static bool wasPreview = false;
         static int dragging = -1;
-        static ImVec2 dragOffset{}, reference(16.50f, 162.50f);
+        static ImVec2 dragOffset{};
+        auto& reference = voiceHudReference;
         if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
         const float hudScale = std::min(io.DisplaySize.x / 1920.0f, io.DisplaySize.y / 1080.0f);
         const float scale = std::clamp(io.DisplaySize.y / 1080.0f, .75f, 1.5f);
@@ -484,24 +719,7 @@ namespace menu {
             const bool blocked = preview ? phase == 3 : !self && (preference.is_mute || preference.volume == 0 || !VoiceChat::voiceEnabled);
             const auto spoke = self ? VoiceChat::localSpokeAt.load() : VoiceChat::remoteSpokeAt.load();
             const bool speaking = preview ? phase == 1 : !muted && !blocked && spoke && now - spoke < 180;
-            if (speaking) for (int glow = 4; glow >= 1; --glow)
-                draw->AddRect(ImVec2(at.x - glow * scale, at.y - glow * scale), ImVec2(at.x + size + glow * scale, at.y + size + glow * scale), IM_COL32(70, 255, 130, 150 / glow), 3 * scale, 0, 2 * scale);
-            DrawAvatar(draw, at, size, self ? local.avatar : peer.avatar);
-            if (known && !muted && !blocked) continue;
-            const ImVec2 badge(at.x + size - 7 * scale, at.y + size - 6 * scale);
-            draw->AddCircleFilled(badge, 10 * scale, IM_COL32(22, 23, 30, 240));
-            const ImU32 color = (muted || blocked) ? IM_COL32(255, 75, 85, 255) : IM_COL32(190, 195, 205, 255);
-            if (!known && !blocked) draw->AddText(font, 14 * scale, ImVec2(badge.x - 4 * scale, badge.y - 8 * scale), color, "?");
-            else if (blocked) {
-                draw->AddRectFilled(ImVec2(badge.x - 6 * scale, badge.y - 2 * scale), ImVec2(badge.x - 3 * scale, badge.y + 2 * scale), color);
-                draw->AddTriangleFilled(ImVec2(badge.x - 4 * scale, badge.y), ImVec2(badge.x + 1 * scale, badge.y - 5 * scale), ImVec2(badge.x + 1 * scale, badge.y + 5 * scale), color);
-                draw->AddLine(ImVec2(badge.x - 6 * scale, badge.y + 6 * scale), ImVec2(badge.x + 6 * scale, badge.y - 6 * scale), color, 2 * scale);
-            } else {
-                draw->AddRectFilled(ImVec2(badge.x - 2 * scale, badge.y - 6 * scale), ImVec2(badge.x + 2 * scale, badge.y + 1 * scale), color, 2 * scale);
-                draw->AddLine(ImVec2(badge.x, badge.y), ImVec2(badge.x, badge.y + 5 * scale), color, scale);
-                draw->AddLine(ImVec2(badge.x - 3 * scale, badge.y + 5 * scale), ImVec2(badge.x + 3 * scale, badge.y + 5 * scale), color, scale);
-                if (muted || blocked) draw->AddLine(ImVec2(badge.x - 6 * scale, badge.y + 6 * scale), ImVec2(badge.x + 6 * scale, badge.y - 6 * scale), color, 2 * scale);
-            }
+            DrawVoiceTile(draw, at, size, font, self ? local : peer, known, muted, blocked, speaking);
         }
     }
 
@@ -510,6 +728,7 @@ namespace menu {
         if (kv::userSettings && VoiceChat::voiceSettingsDirty.exchange(false)) SaveAllSettings();
         PollMicrophoneKey(io);
         DrawVoiceHUD(io, notificationFont);
+        DrawLoungeVoiceHUD(io, notificationFont);
         static bool announced = false;
         if (!announced) {
             Notify(globals::appName.c_str(), "Module loaded. Press F1 to open menu.");
@@ -683,53 +902,35 @@ namespace menu {
         switch (currentSection) {
         case 2: {
             VoiceChat::PeerView peer;
-            { std::lock_guard lock(VoiceChat::presentationMutex); peer = VoiceChat::peerView; }
+            bool inLounge = false;
+            size_t loungeConnections = 0;
+            {
+                std::lock_guard lock(VoiceChat::presentationMutex);
+                peer = VoiceChat::peerView;
+                inLounge = VoiceChat::FreshLounge(VoiceChat::loungeView, GetTickCount64());
+                if (inLounge) for (const auto& member : VoiceChat::loungeView.members)
+                    if (!member.self && member.peer.connected) ++loungeConnections;
+            }
             std::string status, error;
             std::vector<VoiceChat::Microphone> microphones;
             {
                 std::lock_guard lock(VoiceChat::voiceMutex);
                 status = VoiceChat::voiceStatus; error = VoiceChat::audioError; microphones = VoiceChat::microphones;
             }
-            ImGui::TextWrapped("Connection: %s", status.c_str());
-            if (peer.steamId) {
-                ImGui::Spacing();
-                DrawAvatar(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), 80 * scale, peer.avatar);
-                ImGui::Dummy(ImVec2(80 * scale, 80 * scale));
-                ImGui::SameLine();
-                ImGui::BeginGroup();
-                ImGui::TextUnformatted(peer.name.c_str());
-                ImGui::Text("SteamID: %llu", static_cast<unsigned long long>(peer.steamId));
-                ImGui::TextDisabled("%s", peer.connected ? "In voice chat" : "Not connected");
-                ImGui::EndGroup();
-                const std::string url = "https://steamcommunity.com/profiles/" + std::to_string(peer.steamId);
-                ImGui::TextWrapped("%s", url.c_str());
-                if (ProfileIconButton("##open_profile", false, scale)) VoiceChat::openProfileRequest = peer.steamId;
-                ImGui::SameLine();
-                if (ProfileIconButton("##copy_profile", true, scale)) ImGui::SetClipboardText(url.c_str());
-                const bool micKnown = peer.connected && VoiceChat::remoteMicState >= 0 && GetTickCount64() - VoiceChat::remoteMicStateAt.load() < 2500;
-                ImGui::Text("Opponent microphone: %s", !micKnown ? "Unknown" : VoiceChat::remoteMicState == 1 ? "Muted" : "Enabled");
-                auto preference = VoiceChat::peerPreferences.Get(peer.steamId);
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * .60f);
-                if (ImGui::SliderInt("Opponent volume", &preference.volume, 0, 100, "%d%%")) VoiceChat::peerPreferences.Set(peer.steamId, preference);
-                if (ImGui::Checkbox("Mute this opponent", &preference.is_mute)) VoiceChat::peerPreferences.Set(peer.steamId, preference);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mutes this opponent and stops sending your voice to them.");
-                const auto saveError = VoiceChat::peerPreferences.Error();
-                if (!saveError.empty()) ImGui::TextWrapped("%s", saveError.c_str());
-                ImGui::TextUnformatted("Opponent signal level");
-                const float remoteLevel = peer.connected && GetTickCount64() - VoiceChat::remoteLevelAt.load() < 250 ? VoiceChat::opponentLevel.load() : 0;
-                ImGui::ProgressBar(remoteLevel, ImVec2(-1, 14 * scale));
-            }
+            if (inLounge) ImGui::Text("Voice connections: %zu", loungeConnections);
+            else ImGui::TextWrapped("Connection: %s", status.c_str());
+            DrawVoiceParticipants(scale);
             ImGui::Separator();
             ImGui::TextUnformatted("AUDIO");
             bool enabled = VoiceChat::voiceEnabled.load();
             if (ImGui::Checkbox("Enable voice chat", &enabled)) { VoiceChat::voiceEnabled = enabled; SaveAllSettings(); }
             bool muted = VoiceChat::microphoneMuted.load();
-            if (ImGui::Checkbox("Mute microphone", &muted)) { VoiceChat::microphoneMuted = muted; SaveAllSettings(); }
+            if (ImGui::Checkbox("Mute microphone", &muted)) SetMicrophoneMuted(muted);
             ImGui::Text("Microphone hotkey: %s", HotkeyName(VoiceChat::microphoneHotkey.load()).c_str());
             if (ImGui::Button(bindingMicrophoneKey ? "Press a key (Esc cancels, Backspace clears)" : "Assign microphone hotkey")) bindingMicrophoneKey = true;
             bool test = VoiceChat::microphoneTest.load();
             if (ImGui::Button(test ? "Stop microphone test" : "Test microphone / hear myself")) { test = !test; VoiceChat::microphoneTest = test; }
-            if (test) ImGui::TextWrapped("Local monitoring only: your microphone is not sent to the opponent during this test.");
+            if (test) ImGui::TextWrapped("Local monitoring only: your microphone is not sent to other participants during this test.");
             ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * .60f);
             std::string deviceName = "Unavailable device";
             const UINT device = VoiceChat::microphoneDevice.load();
@@ -760,7 +961,7 @@ namespace menu {
             ImGui::TextUnformatted(!enabled ? "Audio disabled" : muted ? "Microphone muted" : "Microphone activates when connected");
             if (!error.empty()) ImGui::TextWrapped("Audio: %s", error.c_str());
             ImGui::Separator();
-            if (ImGui::CollapsingHeader("Advanced connection details")) {
+            if (!inLounge && ImGui::CollapsingHeader("Advanced connection details")) {
             if (peer.connected && peer.ping >= 0) ImGui::Text("Ping: %d ms", peer.ping);
             else ImGui::TextUnformatted("Ping: unavailable");
             if (peer.connected && peer.qualityLocal >= 0 && peer.qualityRemote >= 0)
@@ -970,6 +1171,9 @@ namespace menu {
 
             }
             if (ImGui::CollapsingHeader("SYSTEM / Diagnostics & defaults")) {
+            bool debugLog = VoiceChat::voiceDebugLog.load();
+            if (ImGui::Checkbox("Detailed voice debug log", &debugLog)) { VoiceChat::voiceDebugLog = debugLog; SaveAllSettings(); }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Writes connection/room/audio counters to plugins/steam_diagnostics.log. Does not record audio.");
             if (ImGui::Checkbox("Show diagnostic information", &frameAdvantageHints.debugInfo)) SaveAllSettings();
             ImGui::TextWrapped("Restore all overlay preferences to their default values. The reset is saved immediately.");
 

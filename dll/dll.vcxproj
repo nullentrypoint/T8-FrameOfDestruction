@@ -131,6 +131,7 @@
     <ClCompile Include="VoiceChat\SteamPeerTrace.cpp" />
     <ClCompile Include="VoiceChat\SteamProfileTrace.cpp" />
     <ClCompile Include="VoiceChat\PlayerIdentityReader.cpp" />
+    <ClCompile Include="VoiceChat\LoungeReader.cpp" />
     <ClCompile Include="VoiceChat\SteamChannelProbe.cpp" />
     <ClCompile Include="globals.cpp" />
     <ClCompile Include="helper.cpp" />
@@ -152,6 +153,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="helper.h" />
+    <ClInclude Include="VoiceChat\LoungeReader.h" />
+    <ClInclude Include="VoiceChat\CustomLobbyReader.h" />
+    <ClInclude Include="VoiceChat\LoungeLayout.h" />
+    <ClInclude Include="VoiceChat\LoungeScene.h" />
+    <ClInclude Include="VoiceChat\LoungeVoice.h" />
+    <ClInclude Include="VoiceChat\LoungeVoiceProtocol.h" />
+    <ClInclude Include="VoiceChat\VoiceMixer.h" />
+    <ClInclude Include="VoiceChat\VoiceParticipantRows.h" />
     <ClInclude Include="msdf_text.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />

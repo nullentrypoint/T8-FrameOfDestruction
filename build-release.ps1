@@ -68,7 +68,7 @@ $build = Join-Path $output 'build'
 $work = Join-Path $output ([Guid]::NewGuid().ToString('N'))
 $stage = Join-Path $work 'package'
 $config = Join-Path $stage 'plugins\T8FrameOfDestruction\config'
-$archive = Join-Path $output ("T8-FrameOfDestruction-{0}.zip" -f (Get-Date -Format 'yyyy-MM-dd-HHmmss'))
+$archive = Join-Path $output ("T8-FrameOfDestruction-{0}-build.zip" -f (Get-Date -Format 'yyyyMMddHHmm'))
 New-Item -ItemType Directory -Path $build, $config -Force | Out-Null
 
 try {

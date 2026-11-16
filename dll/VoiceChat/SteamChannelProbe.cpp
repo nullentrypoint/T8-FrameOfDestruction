@@ -3,6 +3,7 @@
 #include "SteamDiagnostics.h"
 #include "SteamProbeProtocol.h"
 #include "VoiceAudio.h"
+#include "LoungeVoice.h"
 #include "SteamPeerProfile.h"
 #include "PeerPreferences.h"
 #include "../third_party/GameNetworkingSocketsHeaders/isteamnetworkingmessages.h"
@@ -10,6 +11,8 @@
 #include <bcrypt.h>
 #include <charconv>
 #include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #ifdef T8_PEER_TRACE_TEST
 #include <cassert>
 #endif
@@ -60,6 +63,137 @@ struct SteamChannelProbe::Impl {
     SteamPeerProfile profile;
     PeerView peer;
     PeerView localPeer;
+    struct CachedProfile { PeerView peer; uint64_t refreshedAt = 0; };
+    std::unordered_map<uint64_t, CachedProfile> loungeProfiles;
+    std::string loungeRoom;
+    std::unordered_map<uint64_t, std::string> recentGameNames;
+    LoungeSnapshot loungeSnapshot;
+    uint64_t loungeAt = 0;
+    bool loungeRouting = false;
+    uint64_t nextDebug = 0;
+    void DebugTick() {
+        if (!voiceDebugLog) { nextDebug = 0; return; }
+        const auto now = GetTickCount64();
+        if (now < nextDebug) return;
+        nextDebug = now + 2000;
+        log("voice-debug mode=%s read=%s local=%llu room=%s age=%llu members=%zu eligible=%zu ready=%zu radius=%d enabled=%d muted=%d capture=%d test=%d unknown-senders=%llu",
+            loungeRouting ? (loungeSnapshot.customRoom ? "custom" : "lounge/wait") : "match",
+            LoungeStatusName(loungeSnapshot.status), static_cast<unsigned long long>(localPeer.steamId),
+            loungeSnapshot.roomKey.c_str(), static_cast<unsigned long long>(now - loungeAt),
+            loungeSnapshot.participants.size(), lounge.Peers().size(), lounge.ConnectedCount(),
+            DefaultLoungeVoiceDistance, int(voiceEnabled.load()), int(microphoneMuted.load()),
+            int(captureActive.load()), int(microphoneTest.load()), static_cast<unsigned long long>(lounge.UnknownSenders()));
+        for (const auto& member : loungeSnapshot.participants) {
+            log("voice-debug roster steam=%llu platform=%d distance=%.1f",
+                static_cast<unsigned long long>(member.steamIdCandidate), member.platform, member.distance);
+        }
+        for (const auto& [id, p] : lounge.Peers())
+            log("voice-debug peer=%llu ready=%d gain=%.3f mute=%d volume=%d mic=%d ack-age=%llu wire=%llu rejected=%llu sent=%llu received=%llu failed=%llu hello=%llu hello-failed=%llu",
+                static_cast<unsigned long long>(id), int(p.handshake.Ready()), p.gain, int(p.controls.muted), p.controls.volume,
+                p.micState, static_cast<unsigned long long>(now - p.lastAck), static_cast<unsigned long long>(p.wireReceived),
+                static_cast<unsigned long long>(p.rejected), static_cast<unsigned long long>(p.sent),
+                static_cast<unsigned long long>(p.received), static_cast<unsigned long long>(p.failed),
+                static_cast<unsigned long long>(p.helloSent), static_cast<unsigned long long>(p.helloFailed));
+        if (selected)
+            log("voice-debug match-peer=%llu ready=%d sent=%llu received=%llu failed=%llu",
+                static_cast<unsigned long long>(selected->remoteSteam), int(handshake.Ready()),
+                static_cast<unsigned long long>(sentAudio), static_cast<unsigned long long>(receivedAudio),
+                static_cast<unsigned long long>(failedAudio));
+    }
+    LoungeVoice lounge{
+        [this](uint64_t id, const LoungeProtocol::Bytes& bytes, bool reliable) {
+            return messages && messages->SendMessageToUser(Identity(id), bytes.data(), static_cast<uint32>(bytes.size()),
+                reliable ? k_nSteamNetworkingSend_Reliable | k_nSteamNetworkingSend_NoNagle |
+                    k_nSteamNetworkingSend_AutoRestartBrokenSession : k_nSteamNetworkingSend_UnreliableNoDelay,
+                LoungeProtocol::Channel) == k_EResultOK;
+        },
+        [this](uint64_t id) { if (messages) messages->CloseChannelWithUser(Identity(id), LoungeProtocol::Channel); },
+        [](LoungeProtocol::Nonce& nonce) {
+            return BCryptGenRandom(nullptr, nonce.data(), static_cast<ULONG>(nonce.size()),
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+        },
+        [](uint64_t id) { const auto p = peerPreferences.Get(id); return LoungeVoice::Controls{p.volume, p.is_mute}; }
+    };
+    void UpdateLounge(const LoungeSnapshot& snapshot, const LoungeCameraLayout& camera) {
+        if ((loungeSnapshot.status == LoungeReadStatus::Ok || !lounge.Peers().empty()) &&
+            (snapshot.status != LoungeReadStatus::Ok || snapshot.world != loungeSnapshot.world ||
+            snapshot.roomKey != loungeSnapshot.roomKey)) {
+            lounge.Reset();
+            audio.Stop(); // Discard capture as well when changing rooms/modes.
+        }
+        loungeSnapshot = snapshot;
+        loungeAt = GetTickCount64();
+        LoungeView view;
+        view.status = snapshot.status;
+        view.customRoom = snapshot.customRoom;
+        view.capturedAt = GetTickCount64();
+        if (snapshot.status == LoungeReadStatus::Ok) {
+            if (loungeRoom != snapshot.roomKey) loungeProfiles.clear();
+            loungeRoom = snapshot.roomKey;
+            view.world = snapshot.world;
+            view.roomKey = snapshot.roomKey;
+            view.camera = camera;
+            auto self = localPeer;
+            self.gameName = "You";
+            self.connected = voiceEnabled && lounge.ConnectedCount() != 0;
+            if (snapshot.customRoom) for (const auto& member : snapshot.participants)
+                if (member.steamIdCandidate == self.steamId) self.gameName = member.name;
+            view.members.push_back({self, snapshot.localActor, 0, snapshot.localPosition, 0, 0, true});
+            std::unordered_set<uint64_t> present;
+            for (const auto& member : snapshot.participants)
+                if (member.steamIdCandidate) present.insert(member.steamIdCandidate);
+            std::erase_if(loungeProfiles, [&](const auto& item) { return !present.contains(item.first); });
+            // Bound Steam work on the guarded voice worker; rotate by oldest refresh.
+            for (const auto id : present) {
+                auto& cached = loungeProfiles[id];
+                cached.peer.steamId = id;
+                if (cached.peer.name == "Opponent") cached.peer.name.clear();
+            }
+            for (int budget = 0; budget < 2 && profile.Available(); ++budget) {
+                auto oldest = loungeProfiles.end();
+                for (auto it = loungeProfiles.begin(); it != loungeProfiles.end(); ++it)
+                    if ((!it->second.refreshedAt || view.capturedAt - it->second.refreshedAt >= 3000) &&
+                        (oldest == loungeProfiles.end() || it->second.refreshedAt < oldest->second.refreshedAt)) oldest = it;
+                if (oldest == loungeProfiles.end()) break;
+                profile.Refresh(oldest->second.peer);
+                oldest->second.refreshedAt = view.capturedAt;
+            }
+            for (const auto& member : snapshot.participants) {
+                if (member.steamIdCandidate && member.steamIdCandidate == localPeer.steamId) continue;
+                PeerView presentation;
+                presentation.name.clear();
+                if (member.steamIdCandidate) presentation = loungeProfiles.at(member.steamIdCandidate).peer;
+                presentation.gameName = member.name;
+                if (const auto it = lounge.Peers().find(presentation.steamId); it != lounge.Peers().end()) {
+                    const auto& p = it->second;
+                    presentation.connected = p.handshake.Ready();
+                    presentation.level = p.level; presentation.levelAt = p.levelAt;
+                    presentation.spokeAt = p.spokeAt; presentation.micState = p.micState;
+                    presentation.micStateAt = p.micStateAt;
+                    presentation.sent = p.sent; presentation.received = p.received; presentation.failed = p.failed;
+                    presentation.connectedSeconds = presentation.connected ? (view.capturedAt - p.connectedAt) / 1000 : 0;
+                    SteamNetConnectionRealTimeStatus_t stats{};
+                    if (messages && presentation.connected &&
+                        messages->GetSessionConnectionInfo(Identity(presentation.steamId), nullptr, &stats) ==
+                        k_ESteamNetworkingConnectionState_Connected) {
+                        presentation.ping = stats.m_nPing;
+                        presentation.qualityLocal = stats.m_flConnectionQualityLocal;
+                        presentation.qualityRemote = stats.m_flConnectionQualityRemote;
+                        presentation.incoming = stats.m_flInBytesPerSec; presentation.outgoing = stats.m_flOutBytesPerSec;
+                        presentation.pendingBytes = stats.m_cbPendingReliable + stats.m_cbPendingUnreliable;
+                    }
+                }
+                if (presentation.steamId) {
+                    if (recentGameNames.size() >= 128 && !recentGameNames.contains(presentation.steamId)) recentGameNames.clear();
+                    recentGameNames[presentation.steamId] = member.name;
+                }
+                view.members.push_back({presentation, member.actor, member.cosmosId,
+                    member.position, member.distance, member.platform, false});
+            }
+        } else { loungeProfiles.clear(); loungeRoom.clear(); }
+        std::lock_guard lock(presentationMutex);
+        loungeView = std::move(view);
+    }
     uint64_t nextMicState = 0;
     uint32_t micSequence = 0, receivedMicSequence = 0;
     bool haveMicSequence = false;
@@ -92,7 +226,11 @@ struct SteamChannelProbe::Impl {
         }
         if (!selected) return;
         profile.Refresh(peer);
+        if (const auto name = recentGameNames.find(peer.steamId); name != recentGameNames.end()) peer.gameName = name->second;
         peer.connected = handshake.Ready();
+        peer.level = opponentLevel.load(); peer.levelAt = remoteLevelAt.load();
+        peer.spokeAt = remoteSpokeAt.load(); peer.micState = remoteMicState.load();
+        peer.micStateAt = remoteMicStateAt.load();
         peer.sent = sentAudio; peer.received = receivedAudio; peer.failed = failedAudio;
         peer.connectedSeconds = peer.connected ? (now - connectedAt) / 1000 : 0;
         SteamNetConnectionRealTimeStatus_t stats{};
@@ -130,6 +268,7 @@ struct SteamChannelProbe::Impl {
     uintptr_t userInitializerRva = 0;
     Impl(Log logger, uintptr_t initializer) : log(logger), userInitializerRva(initializer) {}
     ~Impl() {
+        lounge.Reset();
         Stop();
         if (factoryModule) FreeLibrary(factoryModule);
         if (userModule) FreeLibrary(userModule);
@@ -431,19 +570,74 @@ struct SteamChannelProbe::Impl {
             } else if (++failedAudio == 1) log("voice-audio send failed result=%d", static_cast<int>(result));
         });
     }
+    bool LoungeTick() {
+        const auto now = GetTickCount64();
+        const bool active = loungeSnapshot.status == LoungeReadStatus::Ok && now - loungeAt < 500;
+        const bool blockMatch = active || loungeSnapshot.status != LoungeReadStatus::NotInLounge;
+        if (blockMatch != loungeRouting) {
+            Stop(); lounge.Reset(); audio.Stop(); loungeRouting = blockMatch;
+        }
+        if (!blockMatch) return false;
+        Stop();
+        lounge.Sync(localPeer.steamId, active ? loungeSnapshot : LoungeSnapshot{}, now,
+            DefaultLoungeVoiceDistance, voiceEnabled && messages);
+        audio.SetReceive(100, false);
+        audio.Update(lounge.ConnectedCount() != 0, !lounge.CanSendToAnyone());
+        lounge.Tick(now, microphoneMuted || microphoneTest || !captureActive);
+        if (messages) for (int batch = 0; batch < 8; ++batch) {
+            SteamNetworkingMessage_t* incoming[32]{};
+            const int count = messages->ReceiveMessagesOnChannel(LoungeProtocol::Channel, incoming, 32);
+            if (count <= 0) break;
+            for (int i = 0; i < count && i < 32; ++i) {
+                auto* m = incoming[i];
+                if (!m) continue;
+                if (m->m_nChannel == LoungeProtocol::Channel && m->m_pData &&
+                    m->m_cbSize >= LoungeProtocol::HeaderSize && m->m_cbSize <= LoungeProtocol::AudioSize)
+                    lounge.Receive(m->m_identityPeer.GetSteamID64(),
+                        {static_cast<const uint8_t*>(m->m_pData), static_cast<size_t>(m->m_cbSize)}, now);
+                m->Release();
+            }
+            if (count < 32) break;
+        }
+        audio.Capture([&](const short* pcm) { if (!microphoneTest) lounge.Capture(pcm); });
+        if (lounge.TakePlaybackReset()) audio.FlushPlayback();
+        for (int budget = 0; budget < 6; ++budget) {
+            const auto mixed = lounge.Mix(now);
+            if (lounge.TakePlaybackReset()) audio.FlushPlayback();
+            if (!mixed) break;
+            if (!microphoneTest) audio.PlayMixed(reinterpret_cast<const uint8_t*>(mixed->data()));
+        }
+        if (const auto id = openProfileRequest.exchange(0)) profile.OpenProfile(id);
+        SetVoiceStatus(active ? std::string(loungeSnapshot.customRoom ? "Custom room voice: " : "Lounge voice: ") +
+            std::to_string(lounge.ConnectedCount()) + " connected" : "Waiting for game mode");
+        return true;
+    }
 };
 
 SteamChannelProbe::SteamChannelProbe(Log log, uintptr_t userInitializerRva)
     : impl(std::make_unique<Impl>(log, userInitializerRva)) {}
 SteamChannelProbe::~SteamChannelProbe() = default;
 void SteamChannelProbe::Update(const IdentitySnapshot& snapshot, const IdentitySession& identities) {
+    MatchVoicePair fighters;
+    if (identities.HasVerifiedIdentityPair() && identities.Current()) {
+        if (const auto pair = SelectedPair(*identities.Current()))
+            fighters = {pair->localSteam, pair->remoteSteam, GetTickCount64()};
+    }
+    { std::lock_guard lock(presentationMutex); matchVoicePair = fighters; }
     impl->Prepare(snapshot);
-    impl->Update(identities);
-    impl->AudioTick();
+    if (!impl->LoungeTick()) {
+        impl->Update(identities);
+        impl->AudioTick();
+    }
     impl->RefreshPeer();
+    impl->DebugTick();
+}
+void SteamChannelProbe::UpdateLounge(const LoungeSnapshot& snapshot, const LoungeCameraLayout& camera) {
+    impl->UpdateLounge(snapshot, camera);
 }
 void SteamChannelProbe::Stop() {
     microphoneTest = false;
+    impl->lounge.Reset();
     impl->Stop();
     impl->audio.Stop();
 }

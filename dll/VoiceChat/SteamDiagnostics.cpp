@@ -7,6 +7,8 @@
 #include "IdentitySession.h"
 #include "SteamChannelProbe.h"
 #include "MemoryLayout.h"
+#include "LoungeLayout.h"
+#include "VoicePresentation.h"
 #include <TlHelp32.h>
 #include <filesystem>
 #include <array>
@@ -26,6 +28,11 @@ namespace {
     bool channelProbeRequested = false;
     VoiceChat::MemoryLayout memoryLayout;
     std::string memoryLayoutError;
+    VoiceChat::LoungeLayout loungeLayout;
+    VoiceChat::CustomLobbyLayout customLobbyLayout;
+    std::string customLobbyLayoutError;
+    VoiceChat::LoungeCameraLayout loungeCamera;
+    std::string loungeLayoutError;
     std::mutex stopMutex;
     std::atomic<bool> steamShuttingDown{false};
     using SteamShutdown = void(__cdecl*)();
@@ -183,8 +190,16 @@ namespace {
         VoiceChat::IdentityTransitions identityTransitions;
         VoiceChat::IdentitySession identitySession;
         VoiceChat::SteamChannelProbe channelProbe(Log, memoryLayout.userInitializer);
+        VoiceChat::LoungeReader loungeReader(base, loungeLayout,
+            [](void*, uintptr_t address, void* output, size_t size) { return Read(address, output, size); }, nullptr);
+        VoiceChat::CustomLobbyReader customReader(base, customLobbyLayout,
+            [](void*, uintptr_t address, void* output, size_t size) { return Read(address, output, size); }, nullptr);
+        if (!loungeLayoutError.empty()) Log("lounge-reader disabled: %s", loungeLayoutError.c_str());
+        if (!customLobbyLayoutError.empty()) Log("custom-room-reader disabled: %s", customLobbyLayoutError.c_str());
         VoiceChat::IdentitySnapshot identitySnapshot;
         ULONGLONG nextIdentityRead = 0;
+        ULONGLONG nextLoungeRead = 0;
+        VoiceChat::LoungeSnapshot latestLounge;
         do {
             if (GetTickCount64() >= nextIdentityRead) {
                 identitySnapshot = identities.Read();
@@ -202,6 +217,20 @@ namespace {
                     type, static_cast<unsigned long long>(event.session.generation), event.reason,
                     event.session.localIds[1].c_str(), event.session.remoteIds[1].c_str(),
                     event.session.remoteIds[2].c_str(), event.session.remoteIds[3].c_str());
+            }
+            if (latestLounge.status == VoiceChat::LoungeReadStatus::Ok &&
+                !(latestLounge.customRoom ? customReader.StillCurrent(latestLounge) : loungeReader.StillCurrent(latestLounge)))
+                nextLoungeRead = 0;
+            if (GetTickCount64() >= nextLoungeRead) {
+                latestLounge = loungeLayoutError.empty() ? loungeReader.Read() :
+                    VoiceChat::LoungeSnapshot{VoiceChat::LoungeReadStatus::UnsupportedBuild};
+                if (latestLounge.status != VoiceChat::LoungeReadStatus::Ok && customLobbyLayoutError.empty()) {
+                    const auto custom = customReader.Read();
+                    if (custom.status != VoiceChat::LoungeReadStatus::NotInLounge &&
+                        custom.status != VoiceChat::LoungeReadStatus::UnsupportedBuild) latestLounge = custom;
+                }
+                channelProbe.UpdateLounge(latestLounge, loungeCamera);
+                nextLoungeRead = GetTickCount64() + 200;
             }
             if (channelProbeRequested) channelProbe.Update(identitySnapshot, identitySession);
             for (const auto& event : identityTransitions.Update(identitySnapshot)) {
@@ -252,6 +281,7 @@ namespace {
             if (profileRequested) ProfileTrace::Flush(Log);
         } while (WaitForSingleObject(stopEvent, channelProbeRequested ? 10 : 1000) == WAIT_TIMEOUT);
         channelProbe.Stop();
+        { std::lock_guard lock(VoiceChat::presentationMutex); VoiceChat::loungeView = {}; }
         Log("passive Steam diagnostics stopped");
         return 0;
     }
@@ -271,6 +301,10 @@ void Start() {
     if (!logFile) return;
     VoiceChat::LoadMemoryLayout(directory / L"T8FrameOfDestruction" / L"config" / L"memory_address.ini",
         memoryLayout, memoryLayoutError);
+    const auto loungePath = directory / L"T8FrameOfDestruction" / L"config" / L"memory_address.ini";
+    VoiceChat::LoadLoungeLayout(loungePath, loungeLayout, loungeLayoutError);
+    VoiceChat::LoadCustomLobbyLayout(loungePath, customLobbyLayout, customLobbyLayoutError);
+    loungeCamera = VoiceChat::LoadLoungeCameraLayout(loungePath);
     stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (stopEvent) worker = CreateThread(nullptr, 0, Run, nullptr, 0, nullptr);
     if (!worker) {

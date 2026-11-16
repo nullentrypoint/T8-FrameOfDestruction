@@ -1,6 +1,7 @@
 // Real settings load/save/reset roundtrip, isolated from the user's INI.
 #include "stdafx.h"
 #include "VoiceChat/VoiceAudio.h"
+#include "VoiceChat/VoicePresentation.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -64,6 +65,7 @@ int main() {
     VoiceChat::microphoneMuted = true;
     VoiceChat::microphoneTest = true;
     VoiceChat::microphoneGain = 235;
+    VoiceChat::voiceDebugLog = true;
     VoiceChat::preferredMicrophone = "USB microphone";
     menu::SaveAllSettings();
     ini::Config loaded(path.string()); loaded.Read(); kv::userSettings = &loaded;
@@ -73,9 +75,11 @@ int main() {
     VoiceChat::microphoneMuted = false;
     VoiceChat::microphoneTest = false;
     VoiceChat::microphoneGain = 100;
+    VoiceChat::voiceDebugLog = false;
     VoiceChat::preferredMicrophone.clear();
     menu::LoadSettings();
     assert(VoiceChat::microphoneHotkey == VK_F8);
+    assert(VoiceChat::voiceDebugLog);
     assert(!VoiceChat::voiceEnabled && VoiceChat::microphoneMuted && !VoiceChat::microphoneTest);
     assert(VoiceChat::microphoneGain == 235 && VoiceChat::preferredMicrophone == "USB microphone");
     VoiceChat::microphones = {{WAVE_MAPPER, "System default"}, {7, "USB microphone"}};

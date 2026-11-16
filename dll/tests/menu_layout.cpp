@@ -16,6 +16,9 @@ namespace console {
     void AddLogError(const std::string&) {}
 }
 namespace kv { ini::Config* userSettings = nullptr; }
+#ifdef T8_MENU_LAYOUT_TEST
+namespace menu { void ShowVoiceSectionForTest(); }
+#endif
 namespace overlay {
     uint64_t AddFlyingText(const std::string&, const std::optional<ScreenAnchor>&,
         const std::string&, const std::optional<WorldPoint>&) { return 0; }
@@ -73,6 +76,38 @@ int main() {
     assert(ImGui::GetStyle().WindowPadding.x == padding.x);
     const auto accent = ImGui::GetStyle().Colors[ImGuiCol_ResizeGripActive];
     assert(accent.x > accent.z);
+#ifdef T8_MENU_LAYOUT_TEST
+    menu::ShowVoiceSectionForTest();
+    VoiceChat::loungeView.status = VoiceChat::LoungeReadStatus::Ok;
+    VoiceChat::loungeView.roomKey = "SYNTHETIC_LOUNGE";
+    for (int i = 0; i < 64; ++i) {
+        VoiceChat::LoungeMemberView row;
+        row.peer.steamId = 76561198000000001ULL + i;
+        row.peer.gameName = "Long game nickname to exercise cell clipping " + std::to_string(i);
+        row.peer.name = "Different Steam nickname " + std::to_string(i);
+        row.peer.connected = i % 2 == 0;
+        row.peer.ping = row.peer.connected ? 42 : -1;
+        VoiceChat::loungeView.members.push_back(row);
+    }
+    for (const auto resolution : {ImVec2(1920, 1080), ImVec2(800, 600), ImVec2(3840, 2160)}) {
+        VoiceChat::loungeView.capturedAt = GetTickCount64();
+        frame(resolution.x, resolution.y);
+        frame(resolution.x, resolution.y);
+        auto& tables = ImGui::GetCurrentContext()->Tables;
+        bool found = false;
+        for (int i = 0; i < tables.GetMapSize(); ++i) {
+            auto* table = tables.TryGetMapData(i);
+            if (!table || table->ColumnsCount != 6) continue;
+            found = true;
+            assert(table->InnerWindow->ScrollMax.y > 0); // Many participants scroll instead of expanding the menu.
+            assert(table->OuterRect.Min.x >= 0 && table->OuterRect.Max.x <= resolution.x + 1);
+            for (int column = 0; column < 6; ++column)
+                assert(table->Columns[column].WidthGiven > 0);
+        }
+        assert(found);
+    }
+    VoiceChat::loungeView = {};
+#endif
     ImGui::DestroyContext();
     // ResizeBuffers destroys and recreates the entire context in the DX12 hook.
     ImGui::CreateContext();

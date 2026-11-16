@@ -7,6 +7,7 @@
 #include "namespaces.h"
 #include "helper.h"
 #include "VoiceChat/VoicePresentation.h"
+#include "VoiceChat/LoungeLayout.h"
 #include <format>
 #include <mutex>
 
@@ -187,6 +188,62 @@ namespace console {
         commands["voice_preview"] = [](const std::vector<std::string>&) {
             VoiceChat::avatarPreviewUntil = GetTickCount64() + 10000;
             AddLog("Voice avatar preview: 10 seconds. Drag either avatar with the left mouse button; the other mirrors it. Keep the menu open for mouse input. Final coordinates will be logged.");
+        };
+        commands["voice_debug"] = [](const std::vector<std::string>& args) {
+            if (args.size() == 1) {
+                AddLog(std::format("Voice debug log: {}. File: {}\\steam_diagnostics.log",
+                    VoiceChat::voiceDebugLog ? "on" : "off", helper::GetCurrentDllDirectory()));
+                return;
+            }
+            if (args.size() != 2 || (args[1] != "on" && args[1] != "off")) {
+                AddLogError("Usage: voice_debug [on|off]"); return;
+            }
+            VoiceChat::voiceDebugLog = args[1] == "on";
+            if (kv::userSettings) {
+                kv::userSettings->SetKey("debug_log", VoiceChat::voiceDebugLog ? "true" : "false", "VoiceChat");
+                if (!kv::userSettings->Save()) AddLogError("Logging changed, but saving settings failed.");
+            }
+            AddLog(std::format("Voice debug log {}: {}\\steam_diagnostics.log",
+                args[1], helper::GetCurrentDllDirectory()));
+        };
+        commands["lounge_info"] = [](const std::vector<std::string>&) {
+            VoiceChat::LoungeLayout layout;
+            std::string error;
+            const auto path = std::filesystem::path(helper::GetCurrentDllDirectory()) /
+                "T8FrameOfDestruction" / "config" / "memory_address.ini";
+            if (!VoiceChat::LoadLoungeLayout(path, layout, error)) { AddLogError(error); return; }
+            const auto read = [](void*, uintptr_t address, void* output, size_t size) -> bool {
+                SIZE_T copied = 0;
+                return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                    output, size, &copied) && copied == size;
+            };
+            const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(L"Polaris-Win64-Shipping.exe"));
+            const auto snapshot = VoiceChat::LoungeReader(base, layout, read, nullptr).Read();
+            AddLog(std::string("[Lounge] ") + VoiceChat::LoungeStatusName(snapshot.status));
+            if (snapshot.status != VoiceChat::LoungeReadStatus::Ok) return;
+            AddLog(std::format("[Lounge] room={} participants={} local=({:.1f}, {:.1f}, {:.1f})",
+                snapshot.roomKey, snapshot.participants.size(), snapshot.localPosition.x,
+                snapshot.localPosition.y, snapshot.localPosition.z));
+            for (const auto& peer : snapshot.participants)
+                AddLog(std::format("[Lounge] {} | platform={} Steam candidate={} | distance={:.1f} game units",
+                    peer.name, peer.platform, peer.steamIdCandidate ? "yes" : "no", peer.distance));
+        };
+        commands["lounge_avatar_distance"] = [](const std::vector<std::string>& args) {
+            if (args.size() == 1) {
+                AddLog(std::format("Lounge avatar distance: {} game units from camera (0 = hidden). Usage: lounge_avatar_distance <0..100000|reset>",
+                    VoiceChat::loungeAvatarDistance.load()));
+                return;
+            }
+            int distance = static_cast<int>(VoiceChat::LoungeAvatarMaxDistance);
+            if (args.size() != 2 || (args[1] != "reset" && !VoiceChat::ParseLoungeAvatarDistance(args[1], distance))) {
+                AddLogError("Usage: lounge_avatar_distance <0..100000|reset>. Use a whole number in game units; 0 hides world avatars.");
+                return;
+            }
+            VoiceChat::loungeAvatarDistance = distance;
+            AddLog(std::format("Lounge avatar distance: {} game units from camera{}", distance, distance ? "" : " (hidden)"));
+            if (!kv::userSettings) { AddLog("Applied for this session; settings file is not available."); return; }
+            kv::userSettings->SetKey("lounge_avatar_distance", std::to_string(distance), "VoiceChat");
+            if (!kv::userSettings->Save()) AddLogError("Distance applied, but saving user settings failed.");
         };
         commands["help"] = [](const std::vector<std::string>&) {
             console::AddLog("available commands:");

@@ -1,6 +1,6 @@
 ---
 name: update-tekken-addresses
-description: Update memory_address.ini after a Tekken 8 patch: discover and validate frame, player, throw, camera, and voice-chat addresses using Cheat Engine MCP, verify captures with replay tests, and deploy the updated configuration.
+description: Update memory_address.ini after a Tekken 8 patch: discover and validate frame, player, throw, camera, match voice, Fight Lounge and custom-room roster addresses using Cheat Engine MCP, verify captures with production readers/replay tests, and deploy the updated configuration.
 ---
 
 # Updating Tekken 8 Addresses
@@ -20,10 +20,15 @@ paths are relative to this skill's directory.
   `dll/TekkenBot/MoveInfoEnums.h`.
 - **repo:** `dll/VoiceChat/MemoryLayout.h`, `dll/VoiceChat/PlayerIdentityReader.cpp`,
   `dll/VoiceChat/SteamChannelProbe.cpp`, `dll/VoiceChat/SteamDiagnostics.cpp`.
+- For room voice: **repo:** `dll/VoiceChat/LoungeLayout.h`,
+  `dll/VoiceChat/LoungeReader.h`, `dll/VoiceChat/LoungeReader.cpp`,
+  `dll/VoiceChat/CustomLobbyReader.h`, `dll/VoiceChat/LoungeVoice.h`.
 - As needed: **repo:** `dll/tests/README.md`, `dll/tests/throw_timeline.md`,
   `dll/tests/throw_window_research.md`, `dll/tests/voice_3_03_01.md`.
 - `references/ce-workflow.md`: CE discovery and capture techniques.
 - `references/3.03.01-evidence.md`: evidence and pitfalls from a previous migration.
+- `references/room-voice-addresses.md`: Fight Lounge/custom-room chains, lifetime
+  guards, bounded roster layouts, production probes and controlled checks.
 
 Historical RVAs, structure sizes, move IDs, and frame advantages are not evidence
 for a new build. Treat the current INI as a starting hypothesis and the reader
@@ -44,6 +49,10 @@ code as the specification of how the mod interprets that configuration.
    P1/P2 base, observation, and validation status. Store captures outside the
    repository; keep a concise evidence report without real Steam IDs or large
    dumps in the project.
+   Use local/remote placeholders for nicknames, Steam IDs, Tekken IDs, game-user
+   IDs and custom-room keys. Scan source, tests, reports and skill references for
+   captured identities before finishing. Synthetic fixtures must be clearly
+   marked; keep raw diagnostic logs outside the repository.
 
 ## 2. Pointer chains and rollback storage
 
@@ -127,6 +136,12 @@ Update `VoiceIdentity`, `VoiceSteam`, `VoicePeerTrace`, and `VoiceProfileTrace`
 in the same INI. The current loader requires all four sections, with no compiled
 fallback RVAs. Keep the voice configuration complete.
 
+Room support additionally loads `VoiceLounge`, `VoiceCustomLobby`, and
+`SpatialCamera`. Their layouts use separate loaders and PE/vtable/class guards.
+Do not treat a successful match identity read as validation of either room
+roster. Update the PE timestamp and image size only after validating the
+corresponding fixed-offset structure layout on that build.
+
 - Identity: locate the container and verify its vector header, object vtable,
   destructor guard, four strings, and stable rereads through the production
   `PlayerIdentityReader`.
@@ -143,6 +158,36 @@ fallback RVAs. Keep the voice configuration complete.
 - A valid local record and resolved imports do not establish remote identity,
   handshake, or audio operation. Verify those in an online session with a
   compatible second client.
+
+### Fight Lounge and custom-room validation
+
+Follow `references/room-voice-addresses.md` for the exact layouts and commands.
+
+1. Fight Lounge: validate GWorld, game-mode class/active flags, subsystem/network
+   object, opaque room key, local pawn, and sparse enemy map. Match candidate
+   Steam IDs to user-confirmed participants, including a console-player control.
+   Verify world-position doubles, sparse holes and entries beyond bit 31.
+2. Custom room Player Match: find the manager root and follow
+   its current-session shared pointer, then the bounded member map. Compare both
+   Steam-ID strings and the node's user key against the participant record.
+   The global cached room-ID pointer is not an active-session predicate.
+3. Observe remote leave/rejoin (new allocations), local exit, a different room
+   and a full process restart. Re-resolve every pointer from the new module base.
+   Verify that a null current session suppresses membership even when old room
+   strings remain readable.
+4. Run the external production probes, not just Lua reads. Corrupt/unreadable/
+   mutated snapshots must not publish partial rosters or retain stale audio.
+5. Verify both endpoints with compatible builds: room agreement, nonce ACK,
+   bidirectional audio, mute, removal and transitions into/out of a match.
+   Check fighter-side HUD positions independently from the complete menu roster;
+   host migration and spectator-viewer identity mapping need explicit scenarios.
+6. Use `voice_debug on` on both clients (also Settings → System) for bounded
+   `steam_diagnostics.log` snapshots. `ready=1` plus increasing receive counters
+   validates transport, not audible quality. Failed attempts to unrelated room
+   members do not imply failure of the connected test pair. Fight Lounge hearing
+   is always unlimited within the same room (internal radius `-1`); the old
+   distance command and saved values are no longer used. Avatar visibility
+   range is a separate setting.
 
 ## 6. Changes, verification, and deployment
 

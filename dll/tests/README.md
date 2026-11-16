@@ -1,5 +1,43 @@
 # Frame advantage replay checks
 
+## Lounge diagnostic reader
+
+From `dll/` in an x64 Visual Studio developer prompt (keep assertions enabled):
+
+```bat
+set "T8_TEST_OUT=%LOCALAPPDATA%\Temp\opencode"
+cl /nologo /std:c++20 /EHsc /MD /DNOMINMAX /I. tests\lounge_reader.cpp VoiceChat\LoungeReader.cpp /Fo"%T8_TEST_OUT%\\" /Fe"%T8_TEST_OUT%\t8_lounge_reader.exe"
+"%T8_TEST_OUT%\t8_lounge_reader.exe"
+cl /nologo /std:c++20 /EHsc /MD /DNOMINMAX /I. tests\lounge_probe.cpp VoiceChat\LoungeReader.cpp /Fo"%T8_TEST_OUT%\\" /Fe"%T8_TEST_OUT%\t8_lounge_probe.exe"
+"%T8_TEST_OUT%\t8_lounge_probe.exe" GAME_PID ..\config\memory_address.ini
+```
+
+The synthetic tests cover sparse slots spanning multiple bitmap words, poisoned
+free entries, world rather than relative coordinates, UTF-16 display names,
+Steam-candidate platform filtering, stale room state in the main menu, build
+guards, unsupported allocation layouts, failed reads, malformed data and mutation
+of the world, container, identities and room string during rereads. The external
+probe uses the production reader with `ReadProcessMemory` and read-only process
+access; it does not inject a library or send packets. Run elevated if process
+access requires it. Exit 0 means either a valid lounge snapshot or a positively
+identified non-lounge mode; always check the printed status.
+
+In the DLL console, `lounge_info` reads a single fresh snapshot and prints the
+opaque room key, local position, and participants sorted by 3D distance in game
+units. It reports raw platform values and whether a Steam ID candidate is present,
+without printing raw player IDs. Each invocation reloads the independent
+`[VoiceLounge]` section from the normal runtime INI location. Failed snapshots
+contain no participants; there is no fallback to the previous room.
+
+This is an on-demand diagnostic, not a voice session or a proximity audio mixer.
+The reader gates fixed structure offsets on PE timestamp and image size and
+validates classes before lounge-specific traversals. Only the observed inline
+128-bit allocation bitmap is supported. Larger/heap-backed layouts report
+`unsupported-layout`. Structural and identity rereads detect observed changes,
+but cannot guarantee an atomic snapshot or detect every ABA change. Positions
+are sampled independently. See `lounge_voice_research.md` for live evidence and
+remaining room-key/zone/transport validation.
+
 ## Memory reader crash regression
 
 From `dll/` in an x64 Visual Studio developer prompt (assertions enabled):
@@ -19,14 +57,168 @@ subsequent game-data reads. Uses a temporary config; no game required.
 From `dll/` in an x64 Visual Studio developer prompt (keep assertions enabled):
 
 ```bat
-cl /nologo /std:c++20 /EHsc /MD /I. tests\menu_layout.cpp menu.cpp ini.cpp imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_widgets.cpp imgui\imgui_tables.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_menu_layout.exe /link /OPT:REF
+cl /nologo /std:c++20 /EHsc /MD /DT8_MENU_LAYOUT_TEST /I. tests\menu_layout.cpp menu.cpp ini.cpp imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_widgets.cpp imgui\imgui_tables.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_menu_layout.exe /link /OPT:REF
 %TEMP%\t8_menu_layout.exe
 ```
 
 Runs the real menu headlessly with Consolas Bold. Checks window bounds after
 1440p/720p/4K/800x600 and aspect-ratio changes, reopening after a resolution
 change while hidden, scaled font size, and restoration of shared font/style state.
-Visual appearance and mouse interaction still need in-game verification.
+Also exercises the compact six-column voice table with 64 participants, long
+names and unavailable connection data at 800x600, 1080p and 4K, checking table
+bounds, positive column widths and vertical scrolling. Visual appearance and
+mouse interaction still need in-game verification.
+
+## Voice participant presentation and lounge HUD
+
+```bat
+cl /nologo /std:c++20 /EHsc /MD /DNOMINMAX /I. tests\voice_participants.cpp /Fo%TEMP%\ /Fe%TEMP%\t8_voice_participants.exe
+%TEMP%\t8_voice_participants.exe
+```
+
+Checks lounge/match row selection, stale-snapshot expiry, independent game and
+Steam names, disconnected/stale signal suppression, direct Unreal-coordinate
+projection, behind-camera/off-screen rejection and world changes during camera
+reads. These mathematical tests do not validate visual head alignment.
+
+The existing guarded Steam diagnostic/voice worker now publishes lounge members
+every 200 ms when the voice probe is enabled. Profile refresh work is bounded to
+two Steam users per update and cached per room. It uses the existing SDK shutdown
+guard and does not introduce a render-thread Steam call. Runtime diagnostics and
+voice-probe opt-in marker files are still required as before. `[VoiceLounge]` and
+`[SpatialCamera]` must be present in the deployed INI.
+
+The voice page shows a scrollable list with avatar, game name / Steam persona,
+connection ping, mute checkbox, receive-volume slider, and fresh signal meter.
+The local row is labelled `You`; microphone gain remains in the audio controls.
+Left-click an avatar to open its Steam profile in the overlay; right-click to
+open the profile menu or copy its link. Per-peer mute/volume use the existing
+Steam-ID preference store. Console/non-Steam rows are omitted. Self is first,
+then connected peers, then disconnected peers; each peer group is sorted by game
+nickname using case-insensitive Unicode collation, with stable identity ties.
+The room key is retained internally but is not displayed in the menu.
+In matches, a previously observed lounge nickname can be reused for the same
+Steam ID; otherwise the game-name field explicitly reports unavailable rather
+than substituting the Steam persona.
+
+Lounge Steam avatars use the same icon/badge renderer as the match HUD. Current
+camera matrices and actor world positions are read for each rendered frame;
+only confirmed voice connections are drawn in the world (self is shown once a
+peer connects). Disconnected Steam participants remain available in the menu.
+world mismatch or snapshots older than one second suppress the lounge overlay.
+The head anchor currently uses root world Z + 110 game units; visual calibration
+is still needed. World markers render on the background draw list, beneath menu
+and console windows. They are drawn far-to-near by camera distance, so nearby
+icons cover distant icons. Markers beyond 2000 Unreal world units from the camera,
+outside the viewport or behind the camera are omitted; there is no wall-occlusion
+test. `lounge_avatar_distance` reports the current camera-distance limit;
+`lounge_avatar_distance 3500` changes it immediately and saves
+`[VoiceChat] lounge_avatar_distance` in user settings. Valid integer values are
+0..100000; 0 hides world markers and `reset` restores 2000. Profile visibility
+alone is not a voice connection: peers need the compatible lounge transport and
+a completed nonce handshake before ping/signal/connected badges are shown.
+
+## Lounge voice transport
+
+Fight Lounge hearing is always **unlimited within the same room**. The former
+`lounge_voice_distance` command and settings read/write have been removed;
+old INI values are ignored. Use the voice-chat enable checkbox to disable audio.
+`lounge_avatar_distance` only controls world-marker visibility.
+Mute blocks both send and receive for that peer; volume affects receive only.
+
+The guarded voice worker uses Steam Messages channel 21561, separate from match
+channel 21560. Room-bound versioned envelopes carry fresh per-pair nonces,
+PCM16 mono 16 kHz / 20 ms blocks, and microphone state. Each peer has replay
+protection and a bounded jitter queue with 40 ms startup; streams mix with
+saturated output. Connected peers publish Steam session ping/quality, audio
+counters, microphone state and attenuated signal level. Steam session byte
+statistics can include other traffic sharing that Steam session.
+
+Roster reads occur every 200 ms; world/mode/active flags are checked each worker
+tick. Stale snapshots, failed reads, room/world changes and disabling voice end
+lounge transport and flush playback. Audio routes exclusively to lounge or match;
+match routing resumes only after a confirmed non-lounge snapshot.
+
+Standalone deterministic transport test (from `dll/`, developer cmd):
+
+```bat
+cl /nologo /std:c++20 /EHsc /MD /DNOMINMAX /I. tests\lounge_voice.cpp /Fo"%T8_TEST_OUT%\\" /Fe"%T8_TEST_OUT%\t8_lounge_voice.exe"
+"%T8_TEST_OUT%\t8_lounge_voice.exe"
+```
+
+Tests cover three clients, simultaneous speakers, clipping, attenuation,
+mute/volume, malformed/wrong-room/wrong-sender packets, sequence wrap/reordering,
+nonce rotation, timeout/reconnect, room changes and disabling transport.
+Real Steam delivery, microphone playback quality and multi-speaker audio still
+require compatible live clients. Test room exit, entering a match, mute/unmute,
+moving through the hearing boundary, and a third simultaneous speaker.
+
+## Custom-room voice (Player Match / Lobby)
+
+Requires the new `[VoiceCustomLobby]` section in the runtime memory INI and the
+same transport-capable build on each Steam client. `CustomLobbyReader` follows
+the session owner's live shared pointer and bounded member map, checks the PE
+fingerprint/vtables, validates duplicate Steam identities and rereads captured
+fields to reject observed mutation. It never uses the persistent global room-ID
+cache as proof of membership.
+
+Custom rooms reuse the multi-peer transport on channel 21561 with a distinct
+`custom:PLM...` room key. Every member can hear every connected member; both
+`lounge_voice_distance` and `lounge_avatar_distance` are irrelevant here.
+The local Steam identity must be present in the current roster to enable audio.
+Room voice takes priority over opponent-only voice while the custom session is
+active. A session-pointer change is detected on each worker tick; complete
+rosters refresh every 200 ms. Room/mode changes reset queued capture and playback.
+
+The HUD uses one horizontal row from the upper-right corner towards the left,
+under menu windows. Only confirmed voice connections are shown, including self
+once at least one peer has connected. Existing speech glow, microphone-state and
+per-peer mute badges are reused. The row shrinks to fit narrow viewports rather
+than wrapping; menu participants retain the complete Steam roster and controls.
+
+From `dll/` in a developer command prompt:
+
+```bat
+cl /nologo /std:c++20 /EHsc /MD /DNOMINMAX /I. tests\custom_lobby_reader.cpp /Fo"%T8_TEST_OUT%\\" /Fe"%T8_TEST_OUT%\t8_custom_reader.exe"
+"%T8_TEST_OUT%\t8_custom_reader.exe"
+cl /nologo /std:c++20 /EHsc /MD /I. tests\custom_lobby_probe.cpp /Fo"%T8_TEST_OUT%\\" /Fe"%T8_TEST_OUT%\t8_custom_probe.exe"
+"%T8_TEST_OUT%\t8_custom_probe.exe" GAME_PID ..\config\memory_address.ini
+```
+
+The probe is an external read-only check of the production reader. It matched
+both live room participants after process restart. Synthetic tests cover member
+removal, local exit, malformed/cyclic lists, build guards, mutation rejection,
+room-wide mixing with hearing radius zero, local-membership gating, HUD filtering
+and horizontal layout. Real Steam audio and HUD appearance still require an
+in-game test with compatible clients. Host migration, fighting and spectator
+transitions remain live-verification cases.
+
+## Voice regression diagnostics
+
+`voice_debug on` / `voice_debug off` (or **Detailed voice debug log** under
+**Settings → SYSTEM / Diagnostics & defaults**) persists `[VoiceChat] debug_log`. With the existing voice
+worker enabled, detailed snapshots are appended every two seconds to
+`plugins/steam_diagnostics.log`. `voice_debug` prints the state and full path.
+Logs include room-reader status, room key, local Steam identity, roster/ranges,
+eligible/connected peers, capture/mute state, HELLO failures, ACK age, incoming
+and rejected envelopes, and PCM send/receive counters; audio content is not saved.
+For a Fight Lounge failure, enable on both clients before entering, stand within
+the configured hearing radius, toggle the microphones and retain both logs.
+
+The mixer now advances by fixed 20 ms sample deadlines and drains due blocks,
+instead of resetting each deadline from a coarse polling timestamp. Playback
+primes two blocks of scheduling headroom after an underrun. Repeated muted-peer
+keepalives no longer flush everyone else's audio. The transport harness simulates
+ten seconds of 31 ms worker ticks with a muted third client and asserts sustained
+50-block/s output without recurring resets.
+
+For a verified local/opponent identity pair, the custom-room HUD shows only
+those connected fighters at the shared `voice_preview` positions; spectators
+remain in the menu. Live spectator-viewer fighter identity mapping is not yet
+established. The self microphone badge reflects the user's mute/test/enable
+setting independently of whether capture has opened. Hotkey and both microphone
+checkboxes now show a green enabled / red crossed-out muted microphone notice
+instead of the generic successful-settings-save notice.
 
 ## Replay checks
 
