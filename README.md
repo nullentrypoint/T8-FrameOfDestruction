@@ -2,7 +2,7 @@
 
 GUI to study frame data while in game.
 
-![example](img/example.gif?raw=true)
+![example](img/example2.gif?raw=true)
 
 This software is intended for educational purposes only.
 
