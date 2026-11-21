@@ -396,8 +396,13 @@ namespace overlay {
         }
     }
 
-    void Init(ImGuiIO& io, ImFont* font) {
+    void Init(ImGuiIO& io, ImFont* font, bool hideCombatHints) {
         msdftext::BeginFrame();
+        if (hideCombatHints) {
+            flyingTexts.clear();
+            ClearThrowTimelines();
+            return;
+        }
         screenSize = io.DisplaySize;
         fontSize = menu::frameAdvantageHints.fontSize;
 

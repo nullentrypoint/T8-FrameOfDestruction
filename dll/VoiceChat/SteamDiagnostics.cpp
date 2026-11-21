@@ -25,7 +25,6 @@ namespace {
     FILE* logFile = nullptr;
     bool traceRequested = false;
     bool profileRequested = false;
-    bool channelProbeRequested = false;
     VoiceChat::MemoryLayout memoryLayout;
     std::string memoryLayoutError;
     VoiceChat::LoungeLayout loungeLayout;
@@ -73,6 +72,7 @@ namespace {
     }
 
     void Log(const char* format, ...) {
+        if (!logFile) return;
         fprintf(logFile, "[%llu] ", GetTickCount64());
         va_list args;
         va_start(args, format);
@@ -164,8 +164,8 @@ namespace {
     DWORD WINAPI Run(void*) {
         Log("Steam diagnostics started pid=%lu peer-trace-requested=%d profile-trace-requested=%d",
             GetCurrentProcessId(), traceRequested, profileRequested);
-        Log("steam-channel-probe requested=%d; audio=PCM16/16000/mono", channelProbeRequested);
-        Modules();
+        Log("Steam voice channel active; audio=PCM16/16000/mono");
+        if (logFile) Modules();
         const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!memoryLayoutError.empty()) Log("steam-probe binding=%s", memoryLayoutError.c_str());
         if (profileRequested) {
@@ -232,7 +232,7 @@ namespace {
                 channelProbe.UpdateLounge(latestLounge, loungeCamera);
                 nextLoungeRead = GetTickCount64() + 200;
             }
-            if (channelProbeRequested) channelProbe.Update(identitySnapshot, identitySession);
+            channelProbe.Update(identitySnapshot, identitySession);
             for (const auto& event : identityTransitions.Update(identitySnapshot)) {
                 Log("player-record %s %s", event.appeared ? "appeared" : "disappeared",
                     VoiceChat::IdentityNotificationDetail(event.player).c_str());
@@ -279,7 +279,7 @@ namespace {
             }
             if (traceRequested) PeerTrace::Flush(Log);
             if (profileRequested) ProfileTrace::Flush(Log);
-        } while (WaitForSingleObject(stopEvent, channelProbeRequested ? 10 : 1000) == WAIT_TIMEOUT);
+        } while (WaitForSingleObject(stopEvent, 10) == WAIT_TIMEOUT);
         channelProbe.Stop();
         { std::lock_guard lock(VoiceChat::presentationMutex); VoiceChat::loungeView = {}; }
         Log("passive Steam diagnostics stopped");
@@ -293,12 +293,11 @@ void Start() {
     const DWORD length = GetModuleFileNameW(globals::mainModule, modulePath, MAX_PATH);
     if (!length || length >= MAX_PATH) return;
     const auto directory = std::filesystem::path(modulePath).parent_path();
-    if (GetFileAttributesW((directory / L"steam_diagnostics.enabled").c_str()) == INVALID_FILE_ATTRIBUTES) return;
-    traceRequested = GetFileAttributesW((directory / L"steam_peer_trace.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
-    profileRequested = GetFileAttributesW((directory / L"steam_profile_trace.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
-    channelProbeRequested = GetFileAttributesW((directory / L"steam_channel_probe.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
-    logFile = _wfsopen((directory / L"steam_diagnostics.log").c_str(), L"a", _SH_DENYNO);
-    if (!logFile) return;
+    // Voice is a shipped feature. Only diagnostic output and research traces are opt-in.
+    if (GetFileAttributesW((directory / L"steam_diagnostics.enabled").c_str()) != INVALID_FILE_ATTRIBUTES)
+        logFile = _wfsopen((directory / L"steam_diagnostics.log").c_str(), L"a", _SH_DENYNO);
+    traceRequested = logFile && GetFileAttributesW((directory / L"steam_peer_trace.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
+    profileRequested = logFile && GetFileAttributesW((directory / L"steam_profile_trace.enabled").c_str()) != INVALID_FILE_ATTRIBUTES;
     VoiceChat::LoadMemoryLayout(directory / L"T8FrameOfDestruction" / L"config" / L"memory_address.ini",
         memoryLayout, memoryLayoutError);
     const auto loungePath = directory / L"T8FrameOfDestruction" / L"config" / L"memory_address.ini";
@@ -311,7 +310,7 @@ void Start() {
         Log("diagnostic worker creation failed: %lu", GetLastError());
         if (stopEvent) CloseHandle(stopEvent);
         stopEvent = nullptr;
-        fclose(logFile);
+        if (logFile) fclose(logFile);
         logFile = nullptr;
     }
 }
@@ -356,7 +355,7 @@ void StopWorker(bool steamShutdown) {
     CloseHandle(worker);
     CloseHandle(stopEvent);
     worker = stopEvent = nullptr;
-    fclose(logFile);
+    if (logFile) fclose(logFile);
     logFile = nullptr;
 }
 }

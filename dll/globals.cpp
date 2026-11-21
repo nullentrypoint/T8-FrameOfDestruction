@@ -15,7 +15,7 @@ namespace globals {
     Backend activeBackend = Backend::None; // DO NOT MODIFY THIS LINE.
     
     const std::string appName = "T8-FrameOfDestruction";
-    const std::string appVersion = "v0.0.3";
+    const std::string appVersion = "v0.0.4";
 }
 
 namespace globals {

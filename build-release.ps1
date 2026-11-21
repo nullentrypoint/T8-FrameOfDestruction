@@ -101,10 +101,18 @@ try {
 
     Copy-Item -LiteralPath "$build\T8FrameOfDestruction.dll" -Destination "$stage\plugins\T8FrameOfDestruction.asi"
     Copy-Item -LiteralPath "$build\T8FrameOfDestruction.pdb" -Destination "$stage\plugins\T8FrameOfDestruction.pdb"
+    $launchOptions = Join-Path $config 'launch_options.ini'
+    New-Item -ItemType File -Path $launchOptions | Out-Null
     Compress-Archive -Path "$stage\*" -DestinationPath "$work\release.zip" -CompressionLevel Optimal
     Move-Item -LiteralPath "$work\release.zip" -Destination $archive
     Write-Host "Created: $archive"
+    $restrictedArchive = $archive -replace '-build\.zip$', '-online-restricted-build.zip'
+    Copy-Item -LiteralPath "$PSScriptRoot\config\launch_options.ini" -Destination $launchOptions -Force
+    Compress-Archive -Path "$stage\*" -DestinationPath "$work\restricted.zip" -CompressionLevel Optimal
+    Move-Item -LiteralPath "$work\restricted.zip" -Destination $restrictedArchive
+    Write-Host "Created: $restrictedArchive"
     if ($installDirectory) {
+        Clear-Content -LiteralPath $launchOptions
         Write-Host "Installing (overwriting packaged files): $installDirectory"
         Copy-Item -Path "$stage\*" -Destination $installDirectory -Recurse -Force
         Write-Host "Installed: $installDirectory"

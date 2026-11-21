@@ -127,7 +127,7 @@ namespace overlay {
     void UpdateThrowTimeline(int side, const ThrowTimeline& timeline);
     void ClearThrowTimelines();
     extern bool isOpen;
-    extern void Init(ImGuiIO& io, ImFont* font);
+    extern void Init(ImGuiIO& io, ImFont* font, bool hideCombatHints);
     extern uint64_t AddFlyingText(const std::string& text,
         const std::optional<ScreenAnchor>& anchor = std::nullopt,
         const std::string& hitType = "",

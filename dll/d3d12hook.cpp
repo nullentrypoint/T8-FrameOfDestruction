@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "VoiceChat/VoicePresentation.h"
+#include "VoiceChat/MemoryLayout.h"
 #include "TekkenBot/GameLog.h"
 #include "TekkenBot/GameReader.h"
 #include "helper.h"
@@ -13,6 +14,51 @@ namespace d3d12hook {
     GameLog gameLog;
     ImFont* overlayFont = NULL;
     ImFont* menuFont = nullptr;
+
+    static bool HideCombatHints() {
+        static const auto config = std::filesystem::path(helper::GetCurrentDllDirectory()) /
+            "T8FrameOfDestruction" / "config";
+        static const bool restrictOnline = GetPrivateProfileIntW(L"Launch", L"HideOnlineCombatHints",
+            0, (config / "launch_options.ini").c_str()) != 0;
+        if (!restrictOnline) return false;
+
+        static const auto identities = [] {
+            VoiceChat::MemoryLayout layout;
+            std::string error;
+            VoiceChat::LoadMemoryLayout(config / "memory_address.ini", layout, error);
+            return VoiceChat::PlayerIdentityReader(reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)), layout.identity);
+        }();
+        const auto snapshot = identities.Read();
+        if (snapshot.status != VoiceChat::IdentityReadStatus::Ok) return true;
+        // Role 0 is a placeholder, 1 is local. Hide for remote or unknown roles.
+        return std::any_of(snapshot.players.begin(), snapshot.players.end(),
+            [](const auto& player) { return player.rawWords[0] > 1; });
+    }
+
+    static void DrawCombatOverlay(ImGuiIO& io) {
+        if (!overlayFont) return;
+        const bool hidden = HideCombatHints();
+        static bool previouslyHidden = false;
+        if (hidden && !previouslyHidden) {
+            gameLog = GameLog{};
+            console::p1.reset();
+            console::p2.reset();
+        }
+        previouslyHidden = hidden;
+        overlay::SetCamera(std::nullopt);
+        if (gameReader) {
+            try {
+                if (!hidden) gameLog.update(gameReader);
+                const auto localP1 = gameReader->read_local_is_p1();
+                VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
+                overlay::SetCamera(gameReader->read_camera());
+            } catch (const std::runtime_error& e) {
+                console::AddLogError(std::format("gameReader update: {}", e.what()));
+                VoiceChat::localPlayerSlot = -1;
+            }
+        }
+        overlay::Init(io, overlayFont, hidden);
+    }
 
     PresentD3D12            oPresentD3D12 = nullptr;
     Present1Fn              oPresent1D3D12 = nullptr;
@@ -198,22 +244,7 @@ namespace d3d12hook {
 
             io.MouseDrawCursor = false;
             menu::Init(io, menuFont);
-            if (overlayFont != NULL) {
-                overlay::SetCamera(std::nullopt);
-                if (gameReader) {
-                    try {
-                        gameLog.update(gameReader);
-                        const auto localP1 = gameReader->read_local_is_p1();
-                        VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
-                        overlay::SetCamera(gameReader->read_camera());
-                    }
-                    catch (const std::runtime_error& e) {
-                        console::AddLogError(std::format("gameReader update: {}", e.what()));
-                        VoiceChat::localPlayerSlot = -1;
-                    }
-                }
-                overlay::Init(io, overlayFont);
-            }
+            DrawCombatOverlay(io);
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
             FrameContext& ctx = gFrameContexts[frameIdx];
@@ -445,22 +476,7 @@ namespace d3d12hook {
             //if (menu::isOpen) menu::Init(io);
             io.MouseDrawCursor = false;
             if (console::isOpen) console::Init(io);
-            if (overlayFont != NULL) {
-                overlay::SetCamera(std::nullopt);
-                if (gameReader) {
-                    try {
-                        gameLog.update(gameReader);
-                        const auto localP1 = gameReader->read_local_is_p1();
-                        VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
-                        overlay::SetCamera(gameReader->read_camera());
-                    }
-                    catch (const std::runtime_error& e) {
-                        console::AddLogError(std::format("gameReader update: {}", e.what()));
-                        VoiceChat::localPlayerSlot = -1;
-                    }
-                }
-                overlay::Init(io, overlayFont);
-            }
+            DrawCombatOverlay(io);
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
             FrameContext& ctx = gFrameContexts[frameIdx];

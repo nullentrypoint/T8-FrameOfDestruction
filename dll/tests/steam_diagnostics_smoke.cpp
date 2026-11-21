@@ -3,6 +3,7 @@
 #include "VoiceChat/SteamDiagnostics.h"
 #include "VoiceChat/PeerCounters.h"
 #include "VoiceChat/VoiceAudio.h"
+#include "VoiceChat/VoicePresentation.h"
 #include "VoiceChat/PeerPreferences.h"
 #include "VoiceChat/MemoryLayout.h"
 #include <filesystem>
@@ -134,7 +135,14 @@ int main() {
     const auto log = root / L"steam_diagnostics.log";
     // Use a fresh test output directory to preserve any existing diagnostics.
     assert(!std::filesystem::exists(marker) && !std::filesystem::exists(log));
+    assert(!std::filesystem::exists(root / L"steam_channel_probe.enabled"));
     SteamDiagnostics::Start();
+    const auto deadline = GetTickCount64() + 5000;
+    for (;;) {
+        { std::lock_guard lock(VoiceChat::presentationMutex); if (VoiceChat::loungeView.capturedAt) break; }
+        assert(GetTickCount64() < deadline);
+        Sleep(10);
+    }
     SteamDiagnostics::Stop();
     assert(!std::filesystem::exists(log));
     { std::ofstream enable(marker); assert(enable.good()); }
@@ -165,5 +173,5 @@ int main() {
     input.close();
     std::filesystem::remove(marker);
     std::filesystem::remove(log);
-    puts("Steam diagnostics lifecycle: PASS (opt-in, unknown build, repeat start/stop, handles)");
+    puts("Steam voice lifecycle: PASS (marker-free startup, optional log, repeat start/stop, handles)");
 }
