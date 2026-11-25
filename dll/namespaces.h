@@ -17,6 +17,8 @@ namespace globals {
         extern Backend activeBackend;
         extern bool enableDebugLog;
         extern const std::string appName;
+        inline bool voiceOnly = false;
+        inline bool hideOnlineCombatHints = false;
         extern const std::string appVersion;
         void SetDebugLogging(bool enable);
 }

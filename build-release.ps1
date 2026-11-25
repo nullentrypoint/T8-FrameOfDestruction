@@ -76,7 +76,8 @@ try {
     Copy-Item -LiteralPath $ActionableFramesPath -Destination "$config\actionable_frames.json"
     # Read explicitly as UTF-8 so Russian text also works in Windows PowerShell 5.1.
     $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
-    Set-Content -LiteralPath "$stage\readme.txt" -Value $readme -Encoding UTF8
+    $standardReadme = $readme.Replace('{{ProductName}}', 'T8-FrameOfDestruction')
+    Set-Content -LiteralPath "$stage\readme.txt" -Value $standardReadme -Encoding UTF8
 
     if (!$Dinput8Path) {
         $loaderZip = Join-Path $work 'loader.zip'
@@ -111,8 +112,15 @@ try {
     Compress-Archive -Path "$stage\*" -DestinationPath "$work\restricted.zip" -CompressionLevel Optimal
     Move-Item -LiteralPath "$work\restricted.zip" -Destination $restrictedArchive
     Write-Host "Created: $restrictedArchive"
+    $voiceArchive = Join-Path $output ((Split-Path -Leaf $archive) -replace '^T8-FrameOfDestruction', 'T8-VoiceOfDestruction')
+    Set-Content -LiteralPath $launchOptions -Value '[Launch]', 'VoiceOnly=1' -Encoding ASCII
+    Set-Content -LiteralPath "$stage\readme.txt" -Value $readme.Replace('{{ProductName}}', 'T8-VoiceOfDestruction') -Encoding UTF8
+    Compress-Archive -Path "$stage\*" -DestinationPath "$work\voice.zip" -CompressionLevel Optimal
+    Move-Item -LiteralPath "$work\voice.zip" -Destination $voiceArchive
+    Write-Host "Created: $voiceArchive"
     if ($installDirectory) {
         Clear-Content -LiteralPath $launchOptions
+        Set-Content -LiteralPath "$stage\readme.txt" -Value $standardReadme -Encoding UTF8
         Write-Host "Installing (overwriting packaged files): $installDirectory"
         Copy-Item -Path "$stage\*" -Destination $installDirectory -Recurse -Force
         Write-Host "Installed: $installDirectory"

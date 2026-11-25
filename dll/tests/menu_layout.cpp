@@ -127,6 +127,16 @@ int main() {
     assert(resizedWindow->Pos.x >= 0 && resizedWindow->Pos.y >= 0);
     assert(resizedWindow->Pos.x + resizedWindow->Size.x <= 1281);
     assert(resizedWindow->Pos.y + resizedWindow->Size.y <= 721);
+    globals::voiceOnly = true;
+    ImGui::NewFrame();
+    ImGui::LogToBuffer();
+    menu::Init(resizedIO, resizedFont);
+    const std::string voiceMenu = ImGui::GetCurrentContext()->LogBuffer.c_str();
+    ImGui::LogFinish();
+    ImGui::Render();
+    assert(ImGui::FindWindowByName("T8-VoiceOfDestruction"));
+    assert(voiceMenu.find("Enable voice chat") != std::string::npos);
+    assert(voiceMenu.find("SETTINGS") == std::string::npos && voiceMenu.find("CONSOLE") == std::string::npos);
     ImGui::DestroyContext();
     std::cout << "Menu resolution, bounds and font/style restoration checks passed\n";
 }

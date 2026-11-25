@@ -1,4 +1,4 @@
-T8-FrameOfDestruction
+{{ProductName}}
 
 УСТАНОВКА (RU)
 1. Установите Microsoft Visual C++ Redistributable x64:

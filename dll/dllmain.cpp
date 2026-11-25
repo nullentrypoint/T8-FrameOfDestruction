@@ -2,6 +2,8 @@
 #include "VoiceChat/SteamDiagnostics.h"
 #include "VoiceChat/SteamPeerTrace.h"
 #include "VoiceChat/SteamProfileTrace.h"
+#include "helper.h"
+#include <filesystem>
 
 static bool TryInitDX12()
 {
@@ -57,6 +59,10 @@ static DWORD WINAPI onAttach(LPVOID)
         return 1;
     }
 
+    const auto options = std::filesystem::path(helper::GetCurrentDllDirectory()) /
+        "T8FrameOfDestruction" / "config" / "launch_options.ini";
+    globals::voiceOnly = GetPrivateProfileIntW(L"Launch", L"VoiceOnly", 0, options.c_str()) == 1;
+    globals::hideOnlineCombatHints = GetPrivateProfileIntW(L"Launch", L"HideOnlineCombatHints", 0, options.c_str()) != 0;
     SteamDiagnostics::Start();
     mousehooks::Init();
     // Retry on this worker only, including when DX12 loads after injection.

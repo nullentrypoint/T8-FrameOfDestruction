@@ -732,6 +732,7 @@ namespace menu {
     }
 
     void Init(ImGuiIO& io, ImFont* notificationFont) {
+        const char* title = globals::voiceOnly ? "T8-VoiceOfDestruction" : globals::appName.c_str();
         if (!isOpen) VoiceChat::microphoneTest = false;
         if (kv::userSettings && VoiceChat::voiceSettingsDirty.exchange(false)) SaveAllSettings();
         PollMicrophoneKey(io);
@@ -739,7 +740,7 @@ namespace menu {
         DrawLoungeVoiceHUD(io, notificationFont);
         static bool announced = false;
         if (!announced) {
-            Notify(globals::appName.c_str(), "Module loaded. Press F1 to open menu.");
+            Notify(title, "Module loaded. Press F1 to open menu.");
             announced = true;
         }
         DrawNotifications(io, notificationFont);
@@ -824,7 +825,7 @@ namespace menu {
         }
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 
-        if (!ImGui::Begin(globals::appName.c_str(), &isOpen, flags)) { ImGui::End(); return; }
+        if (!ImGui::Begin(title, &isOpen, flags)) { ImGui::End(); return; }
         previousScale = scale;
         previousSize = ImGui::GetWindowSize();
         const ImVec2 position = ImGui::GetWindowPos();
@@ -832,10 +833,10 @@ namespace menu {
             std::clamp(position.x, margin, std::max(margin, io.DisplaySize.x - previousSize.x - margin)),
             std::clamp(position.y, margin, std::max(margin, io.DisplaySize.y - previousSize.y - margin))));
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(1.0f, 0.12f, 0.35f, 1.0f), "%s", globals::appName.c_str());
+        ImGui::TextColored(ImVec4(1.0f, 0.12f, 0.35f, 1.0f), "%s", title);
         ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - 110 * scale);
         if (ImGui::Button("CLOSE", ImVec2(110 * scale, 36 * scale))) isOpen = false;
-        ImGui::TextDisabled("TRAINING OVERLAY  /  TEKKEN 8");
+        ImGui::TextDisabled(globals::voiceOnly ? "VOICE CHAT  /  TEKKEN 8" : "TRAINING OVERLAY  /  TEKKEN 8");
         ImGui::Separator();
 
         // Левая панель навигации (фиксированная ширина)
@@ -846,37 +847,21 @@ namespace menu {
         // Кнопки навигации
         ImVec4 activeColor = ImVec4(0.85f, 0.06f, 0.28f, 1.0f);
 
-        // Кнопка MAIN - исправлено
-        bool wasMainActive = (currentSection == 1);
-        if (wasMainActive) {
-            ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+        const auto sectionButton = [&](const char* label, int section) {
+            const bool active = currentSection == section;
+            if (active) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+            if (ImGui::Button(label, ImVec2(-1, 40 * scale))) currentSection = section;
+            if (active) ImGui::PopStyleColor();
+        };
+        if (globals::voiceOnly) {
+            currentSection = 2;
+        } else {
+            sectionButton("SETTINGS", 1);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
+            sectionButton("CONSOLE", 0);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
         }
-        if (ImGui::Button("SETTINGS", ImVec2(-1, 40 * scale))) {
-            currentSection = 1;
-        }
-        if (wasMainActive) {
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
-
-        // Кнопка SETTINGS - исправлено
-        bool wasSettingsActive = (currentSection == 0);
-        if (wasSettingsActive) {
-            ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
-        }
-        if (ImGui::Button("CONSOLE", ImVec2(-1, 40 * scale))) {
-            currentSection = 0;
-        }
-        if (wasSettingsActive) {
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
-        const bool wasVoiceActive = currentSection == 2;
-        if (wasVoiceActive) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
-        if (ImGui::Button("VOICE CHAT", ImVec2(-1, 40 * scale))) currentSection = 2;
-        if (wasVoiceActive) ImGui::PopStyleColor();
+        sectionButton("VOICE CHAT", 2);
 
         // Информация о пути к файлу настроек
         ImGui::Spacing();

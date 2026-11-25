@@ -16,11 +16,10 @@ namespace d3d12hook {
     ImFont* menuFont = nullptr;
 
     static bool HideCombatHints() {
+        if (globals::voiceOnly) return true;
+        if (!globals::hideOnlineCombatHints) return false;
         static const auto config = std::filesystem::path(helper::GetCurrentDllDirectory()) /
             "T8FrameOfDestruction" / "config";
-        static const bool restrictOnline = GetPrivateProfileIntW(L"Launch", L"HideOnlineCombatHints",
-            0, (config / "launch_options.ini").c_str()) != 0;
-        if (!restrictOnline) return false;
 
         static const auto identities = [] {
             VoiceChat::MemoryLayout layout;
@@ -51,7 +50,7 @@ namespace d3d12hook {
                 if (!hidden) gameLog.update(gameReader);
                 const auto localP1 = gameReader->read_local_is_p1();
                 VoiceChat::localPlayerSlot = localP1 ? (*localP1 ? 0 : 1) : -1;
-                overlay::SetCamera(gameReader->read_camera());
+                if (!hidden) overlay::SetCamera(gameReader->read_camera());
             } catch (const std::runtime_error& e) {
                 console::AddLogError(std::format("gameReader update: {}", e.what()));
                 VoiceChat::localPlayerSlot = -1;
@@ -475,7 +474,8 @@ namespace d3d12hook {
 
             //if (menu::isOpen) menu::Init(io);
             io.MouseDrawCursor = false;
-            if (console::isOpen) console::Init(io);
+            if (globals::voiceOnly) menu::Init(io, menuFont);
+            else if (console::isOpen) console::Init(io);
             DrawCombatOverlay(io);
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
